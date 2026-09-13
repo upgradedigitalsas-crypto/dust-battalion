@@ -27,13 +27,14 @@ const CONFIG = {
     knifeCooldown:0.34, grenadeCount:5, grenadeSpeed:145
   },
   PISTOL:{speed:245, damage:1, life:1.25},
+  RIFLE:{speed:280, damage:1, ammo:40, fireRate:0.07},
   SHOTGUN:{speed:225, damage:1, pellets:3, spread:0.18, ammo:30, fireRate:0.33},
   GRENADE:{damage:5, radius:42, fuse:1.0},
   ENEMY:{speed:38, rifleRate:1.25, detect:150, hp:1},
   TURRET:{hp:4, fireRate:1.15},
   TANK:{armor:3, speed:64, jump:155, machineRate:0.09, cannonRate:0.75},
   BOSS:{hp:90, p1Rate:1.45, p2Rate:0.85, p3Rate:1.15},
-  WORLD:{bossTrigger:2460, ambushStart:1880, ambushEnd:2380},
+  WORLD:{bossTrigger:2460, ambushStart:1880, ambushEnd:2380, zone2Start:1300},
   CONTINUES:2
 };
 
@@ -371,6 +372,11 @@ bullet:[
 "VWWV",
 "WKKW",
 "VWWV"
+],
+tracer:[
+"IJJI",
+"JKKJ",
+"IJJI"
 ],
 shell:[
 ".JJ.",
@@ -710,7 +716,10 @@ class Bullet extends Entity{
     }
     handleBulletHit(this);
   }
-  draw(cam){drawSprite(this.kind==="arc"?SPRITES.shell:SPRITES.bullet,this.x-cam.x-4,this.y-4,1,this.vx<0);}
+  draw(cam){
+    const sp=this.kind==="arc"?SPRITES.shell:this.kind==="tracer"?SPRITES.tracer:SPRITES.bullet;
+    drawSprite(sp,this.x-cam.x-4,this.y-4,1,this.vx<0);
+  }
 }
 class Grenade extends Entity{
   constructor(x,y,dir){
@@ -769,7 +778,14 @@ class Crate extends Entity{
   constructor(x,y,special=false){super(x,y);this.hp=3;this.special=special;this.hb={x:0,y:0,w:28,h:28};}
   hurt(d){
     this.hp-=d;shake(2,0.08);
-    if(this.hp<=0){this.dead=true; explode(this.x+14,this.y+14,22,1,"player",false);entities.push(new Item(this.x+14,this.y+5,this.special?"shotgun":(Math.random()<.5?"score":"grenade")));}
+    if(this.hp<=0){
+      this.dead=true; explode(this.x+14,this.y+14,22,1,"player",false);
+      let type;
+      if(this.special==="rifle")type="rifle";
+      else if(this.special)type="shotgun";
+      else type=(Math.random()<.5?"score":"grenade");
+      entities.push(new Item(this.x+14,this.y+5,type));
+    }
   }
   draw(cam){drawSprite(SPRITES.crate,this.x-cam.x,this.y,2);}
 }
@@ -957,14 +973,14 @@ class Boss extends Entity{
 class Player extends Entity{
   constructor(x,y){
     super(x,y);this.hb={x:6,y:2,w:16,h:29};this.lives=CONFIG.PLAYER.lives;this.grenades=CONFIG.PLAYER.grenadeCount;
-    this.special=0;this.fireCd=0;this.knifeCd=0;this.knifeT=0;this.invuln=1;this.facing=1;this.inTank=null;this.crouch=false;
+    this.special=0;this.rifleAmmo=0;this.fireCd=0;this.knifeCd=0;this.knifeT=0;this.invuln=1;this.facing=1;this.inTank=null;this.crouch=false;
     this.lastStep=-1;
   }
   die(){
     if(this.invuln>0||game.state!=="PLAY"||this.inTank)return;
     this.lives--;SFX.death();shake(6,.25);
     for(let i=0;i<8;i++)particles.push(new Particle(this.x+14,this.y+12,rnd(-90,90),rnd(-150,-45),rnd(.35,.8)));
-    this.special=0;this.grenades=CONFIG.PLAYER.grenadeCount;
+    this.special=0;this.rifleAmmo=0;this.grenades=CONFIG.PLAYER.grenadeCount;
     if(this.lives<=0){game.state="GAMEOVER";return;}
     this.x=Math.max(game.checkpoint,48);this.y=80;this.vx=0;this.vy=0;this.invuln=CONFIG.PLAYER.invulnRespawn;
   }
@@ -998,6 +1014,10 @@ class Player extends Entity{
         for(const s of [-CONFIG.SHOTGUN.spread,0,CONFIG.SHOTGUN.spread]){
           entities.push(new Bullet(this.x+14+aim.x*12,this.y+12+aim.y*7,Math.cos(base+s)*CONFIG.SHOTGUN.speed,Math.sin(base+s)*CONFIG.SHOTGUN.speed,"player",CONFIG.SHOTGUN.damage,"bullet"));
         }
+        casing(this.x+13,this.y+9,this.facing);
+      } else if(this.rifleAmmo>0){
+        this.fireCd=CONFIG.RIFLE.fireRate;this.rifleAmmo--;SFX.shot();
+        entities.push(new Bullet(this.x+14+aim.x*12,this.y+12+aim.y*7,aim.x*CONFIG.RIFLE.speed,aim.y*CONFIG.RIFLE.speed,"player",CONFIG.RIFLE.damage,"tracer"));
         casing(this.x+13,this.y+9,this.facing);
       } else {
         this.fireCd=CONFIG.PLAYER.fireRate;SFX.shot();
@@ -1106,6 +1126,7 @@ function casing(x,y,dir=1){particles.push(new Particle(x,y,-dir*rnd(18,34),rnd(-
 function pickupItem(i){
   SFX.pickup();
   if(i.type==="shotgun")player.special=CONFIG.SHOTGUN.ammo;
+  else if(i.type==="rifle")player.rifleAmmo=CONFIG.RIFLE.ammo;
   else if(i.type==="grenade")player.grenades=Math.min(9,player.grenades+3);
   else game.score+=1000;
 }
@@ -1118,7 +1139,7 @@ const SPAWNS = {
   ],
   turrets:[[860,136],[1280,136],[1670,136],[2190,136]],
   hostages:[[430,160],[1040,160],[1710,160],[2290,160]],
-  crates:[[250,160,false],[600,160,true],[1120,160,false],[1510,160,true],[2040,160,false]]
+  crates:[[250,160,false],[600,160,"shotgun"],[1120,160,"rifle"],[1510,160,"shotgun"],[1900,160,"rifle"],[2040,160,false]]
 };
 
 function buildLevel(){
@@ -1225,49 +1246,99 @@ function update(dt){
 /* ============================================================
    RENDER: PARALLAX + TILES + ENTIDADES
    ============================================================ */
+function zoneOf(worldX){ return worldX>CONFIG.WORLD.zone2Start?2:1; }
 function drawSky(){
-  ctx.fillStyle=PAL["5"];ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
-  // gradiente pixelado en franjas
-  ctx.fillStyle=PAL["W"];ctx.fillRect(0,0,CONFIG.W,10);
-  ctx.fillStyle=PAL["V"];ctx.fillRect(0,10,CONFIG.W,8);
-  ctx.fillStyle=PAL["6"];ctx.fillRect(0,18,CONFIG.W,36);
-  ctx.fillStyle=PAL["5"];ctx.fillRect(0,54,CONFIG.W,42);
-  ctx.fillStyle=PAL["4"];ctx.fillRect(0,96,CONFIG.W,70);
-  // nubes lejanas parallax 0.12
-  const ox=-((cam.x*.12)%180);
-  for(let i=-1;i<4;i++){
-    const x=Math.floor(ox+i*180),y=24+(i%2)*13;
-    ctx.fillStyle=PAL["7"];ctx.fillRect(x,y,36,4);ctx.fillRect(x+8,y-4,22,4);
-    ctx.fillStyle=PAL["6"];ctx.fillRect(x+4,y+4,42,3);
+  const z=zoneOf(cam.x);
+  if(z===1){
+    ctx.fillStyle=PAL["5"];ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
+    // gradiente pixelado en franjas
+    ctx.fillStyle=PAL["W"];ctx.fillRect(0,0,CONFIG.W,10);
+    ctx.fillStyle=PAL["V"];ctx.fillRect(0,10,CONFIG.W,8);
+    ctx.fillStyle=PAL["6"];ctx.fillRect(0,18,CONFIG.W,36);
+    ctx.fillStyle=PAL["5"];ctx.fillRect(0,54,CONFIG.W,42);
+    ctx.fillStyle=PAL["4"];ctx.fillRect(0,96,CONFIG.W,70);
+    // nubes lejanas parallax 0.12
+    const ox=-((cam.x*.12)%180);
+    for(let i=-1;i<4;i++){
+      const x=Math.floor(ox+i*180),y=24+(i%2)*13;
+      ctx.fillStyle=PAL["7"];ctx.fillRect(x,y,36,4);ctx.fillRect(x+8,y-4,22,4);
+      ctx.fillStyle=PAL["6"];ctx.fillRect(x+4,y+4,42,3);
+    }
+    // sol
+    ctx.fillStyle=PAL["J"];ctx.fillRect(310,20,18,18);ctx.fillStyle=PAL["K"];ctx.fillRect(314,24,10,10);
+  } else {
+    // ciudad en ruinas al atardecer, cielo frio con humo de guerra
+    ctx.fillStyle=PAL["D"];ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
+    ctx.fillStyle=PAL["F"];ctx.fillRect(0,0,CONFIG.W,12);
+    ctx.fillStyle=PAL["E"];ctx.fillRect(0,12,CONFIG.W,22);
+    ctx.fillStyle=PAL["D"];ctx.fillRect(0,34,CONFIG.W,50);
+    ctx.fillStyle=PAL["C"];ctx.fillRect(0,84,CONFIG.W,82);
+    // sol pálido tras la humareda
+    ctx.globalAlpha=.55;ctx.fillStyle=PAL["N"];ctx.fillRect(300,24,16,16);ctx.globalAlpha=1;
+    // humo lejano parallax
+    const ox=-((cam.x*.12)%180);
+    for(let i=-1;i<4;i++){
+      const x=Math.floor(ox+i*180),y=26+(i%2)*13;
+      ctx.globalAlpha=.55;ctx.fillStyle=PAL["M"];ctx.fillRect(x,y,38,6);ctx.fillRect(x+10,y-5,24,5);
+      ctx.fillStyle=PAL["N"];ctx.fillRect(x+4,y+5,34,3);ctx.globalAlpha=1;
+    }
   }
-  // sol
-  ctx.fillStyle=PAL["J"];ctx.fillRect(310,20,18,18);ctx.fillStyle=PAL["K"];ctx.fillRect(314,24,10,10);
 }
 function drawMidground(){
-  const ox=-((cam.x*.35)%240);
-  for(let j=-1;j<4;j++){
-    const base=Math.floor(ox+j*240);
-    ctx.fillStyle=PAL["3"];
-    ctx.fillRect(base,92,72,70);ctx.fillRect(base+80,110,48,52);ctx.fillRect(base+136,84,66,78);
-    ctx.fillStyle=PAL["2"];
-    for(let x=base+8;x<base+198;x+=22){ctx.fillRect(x,126+(x%3)*6,8,16);}
-    ctx.fillStyle=PAL["4"];
-    ctx.fillRect(base+5,96,24,4);ctx.fillRect(base+145,89,46,4);
-    ctx.fillStyle=PAL["1"];
-    ctx.fillRect(base+26,136,12,26);ctx.fillRect(base+165,126,12,36);
+  const z=zoneOf(cam.x);
+  if(z===1){
+    const ox=-((cam.x*.35)%240);
+    for(let j=-1;j<4;j++){
+      const base=Math.floor(ox+j*240);
+      ctx.fillStyle=PAL["3"];
+      ctx.fillRect(base,92,72,70);ctx.fillRect(base+80,110,48,52);ctx.fillRect(base+136,84,66,78);
+      ctx.fillStyle=PAL["2"];
+      for(let x=base+8;x<base+198;x+=22){ctx.fillRect(x,126+(x%3)*6,8,16);}
+      ctx.fillStyle=PAL["4"];
+      ctx.fillRect(base+5,96,24,4);ctx.fillRect(base+145,89,46,4);
+      ctx.fillStyle=PAL["1"];
+      ctx.fillRect(base+26,136,12,26);ctx.fillRect(base+165,126,12,36);
+    }
+    // dunas
+    ctx.fillStyle=PAL["4"];ctx.fillRect(0,152,CONFIG.W,24);
+    for(let x=-30-(cam.x*.18%50);x<CONFIG.W;x+=50){ctx.fillStyle=PAL["5"];ctx.fillRect(Math.floor(x),148,34,4);}
+  } else {
+    // skyline de ciudad bombardeada
+    const ox=-((cam.x*.35)%220);
+    for(let j=-1;j<5;j++){
+      const base=Math.floor(ox+j*220);
+      ctx.fillStyle=PAL["C"];
+      ctx.fillRect(base,70,40,92);ctx.fillRect(base+50,48,34,114);ctx.fillRect(base+96,86,46,76);ctx.fillRect(base+156,60,36,102);
+      ctx.fillStyle=PAL["D"];
+      for(let wx=base+4;wx<base+188;wx+=10){
+        for(let wy=72;wy<150;wy+=14){ if((wx*3+wy)%23<13) ctx.fillRect(wx,wy,4,6); }
+      }
+      ctx.fillStyle=PAL["1"];
+      ctx.fillRect(base+46,48,10,10);ctx.fillRect(base+8,120,10,42);
+    }
+    // niebla de guerra sobre el suelo
+    ctx.fillStyle=PAL["E"];ctx.fillRect(0,152,CONFIG.W,24);
+    for(let x=-30-(cam.x*.18%50);x<CONFIG.W;x+=50){ctx.fillStyle=PAL["D"];ctx.fillRect(Math.floor(x),148,34,4);}
   }
-  // dunas
-  ctx.fillStyle=PAL["4"];ctx.fillRect(0,152,CONFIG.W,24);
-  for(let x=-30-(cam.x*.18%50);x<CONFIG.W;x+=50){ctx.fillStyle=PAL["5"];ctx.fillRect(Math.floor(x),148,34,4);}
 }
 function drawTile(tx,ty){
   const x=tx*16-cam.x,y=ty*16;
-  ctx.fillStyle=PAL["2"];ctx.fillRect(Math.round(x),y,16,16);
-  ctx.fillStyle=PAL["3"];ctx.fillRect(Math.round(x),y,16,3);
-  ctx.fillStyle=PAL["1"];ctx.fillRect(Math.round(x),y+13,16,3);
-  ctx.fillStyle=PAL["4"];
-  ctx.fillRect(Math.round(x+2+(tx*7+ty*3)%8),y+5,4,2);
-  ctx.fillRect(Math.round(x+9),y+10,3,2);
+  const z=zoneOf(tx*16);
+  if(z===1){
+    ctx.fillStyle=PAL["2"];ctx.fillRect(Math.round(x),y,16,16);
+    ctx.fillStyle=PAL["3"];ctx.fillRect(Math.round(x),y,16,3);
+    ctx.fillStyle=PAL["1"];ctx.fillRect(Math.round(x),y+13,16,3);
+    ctx.fillStyle=PAL["4"];
+    ctx.fillRect(Math.round(x+2+(tx*7+ty*3)%8),y+5,4,2);
+    ctx.fillRect(Math.round(x+9),y+10,3,2);
+  } else {
+    ctx.fillStyle=PAL["L"];ctx.fillRect(Math.round(x),y,16,16);
+    ctx.fillStyle=PAL["M"];ctx.fillRect(Math.round(x),y,16,3);
+    ctx.fillStyle=PAL["C"];ctx.fillRect(Math.round(x),y+13,16,3);
+    ctx.fillStyle=PAL["N"];
+    ctx.fillRect(Math.round(x+2+(tx*7+ty*3)%8),y+5,4,2);
+    ctx.fillRect(Math.round(x+9),y+10,3,2);
+  }
 }
 function drawForeground(){
   const start=Math.floor(cam.x/16)-1,end=start+Math.ceil(CONFIG.W/16)+3;
@@ -1315,7 +1386,8 @@ function drawHUD(){
   textPx("x"+Math.max(0,player.lives),22,6,1,PAL["7"]);
 
   drawSprite(SPRITES.item,66,4,2);
-  textPx(player.special?("x"+player.special):"---",86,6,1,player.special?PAL["K"]:PAL["M"]);
+  const heavyAmmo=player.special>0?player.special:player.rifleAmmo;
+  textPx(heavyAmmo>0?("x"+heavyAmmo):"---",86,6,1,heavyAmmo>0?PAL["K"]:PAL["M"]);
 
   drawSprite(SPRITES.grenade,126,4,3);
   textPx("x"+player.grenades,142,6,1,PAL["J"]);
