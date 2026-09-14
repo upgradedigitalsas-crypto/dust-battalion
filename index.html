@@ -88,13 +88,18 @@ const heroImages = [
 ];
 const enemyRifleImg = loadImg("assets/sprite-enemy_rifle.png",{legtop:143,torsobot:167,pivx:110,pivy:154,split:110});
 const enemyRunnerImg = loadImg("assets/sprite-enemy_runner.png",{legtop:157,torsobot:183,pivx:104,pivy:168,split:104});
+const groundImages = {
+  1: Object.assign(new Image(), {src:"assets/ground-desert.jpg"}),
+  2: Object.assign(new Image(), {src:"assets/ground-city.jpg"})
+};
 const objImages = {
   tank:loadImg("assets/sprite-tank.png"),
   turret:loadImg("assets/sprite-turret.png"),
   boss:loadImg("assets/sprite-boss.png"),
   hostage:loadImg("assets/sprite-hostage.png"),
   crate:loadImg("assets/sprite-crate.png"),
-  barrel:loadImg("assets/sprite-barrel.png")
+  barrel:loadImg("assets/sprite-barrel.png"),
+  sandbags:loadImg("assets/sprite-sandbags.png")
 };
 function imgReady(img){ return img && img.complete && img.naturalWidth>0; }
 // Rig de recorte estilo Spine: el torso se dibuja entero y las dos piernas se
@@ -1496,6 +1501,28 @@ function drawMidground(){
 function drawTile(tx,ty){
   const x=tx*16-cam.x,y=ty*16;
   const z=zoneOf(tx*16);
+  const gimg=groundImages[z];
+  if(imgReady(gimg)){
+    // 16 px de juego se muestrean desde 48 px de textura: mas detalle por pixel
+    const K=3, tw=gimg.naturalWidth, th=gimg.naturalHeight, S=16*K;
+    const span=Math.max(1,tw-S);
+    let sx=(tx*S)%(span*2);
+    let mirror=false;
+    if(sx>span){ sx=span*2-sx; mirror=true; }   // espejo alterno: oculta la costura
+    const isTop=!tileSolid(tx,ty-1);
+    const sy=isTop?0:Math.min(th-S,S+((ty*7)%3)*S*0.5);
+    ctx.save();
+    ctx.imageSmoothingEnabled=true;
+    if(mirror){ ctx.translate(Math.round(x)+16,y); ctx.scale(-1,1); ctx.drawImage(gimg,sx,sy,S,S,0,0,16,16); }
+    else ctx.drawImage(gimg,sx,sy,S,S,Math.round(x),y,16,16);
+    ctx.imageSmoothingEnabled=false;
+    ctx.restore();
+    if(isTop){
+      ctx.fillStyle="rgba(255,226,168,0.20)";ctx.fillRect(Math.round(x),y,16,2);
+      ctx.fillStyle="rgba(0,0,0,0.18)";ctx.fillRect(Math.round(x),y+2,16,1);
+    }
+    return;
+  }
   if(z===1){
     ctx.fillStyle=PAL["2"];ctx.fillRect(Math.round(x),y,16,16);
     ctx.fillStyle=PAL["3"];ctx.fillRect(Math.round(x),y,16,3);
@@ -1512,9 +1539,25 @@ function drawTile(tx,ty){
     ctx.fillRect(Math.round(x+9),y+10,3,2);
   }
 }
+const SCENERY=[
+  [210,"barrel"],[268,"sandbags"],[480,"sandbags"],[700,"barrel"],[760,"barrel"],
+  [980,"sandbags"],[1150,"barrel"],[1340,"sandbags"],[1600,"barrel"],[1660,"sandbags"],
+  [1880,"barrel"],[2100,"sandbags"],[2260,"barrel"],[2420,"sandbags"]
+];
+function drawScenery(){
+  for(const [wx,kind] of SCENERY){
+    const sx=wx-cam.x;
+    if(sx<-40||sx>CONFIG.W+40) continue;
+    const img=objImages[kind];
+    if(!imgReady(img)) continue;
+    const h=kind==="barrel"?26:20;
+    drawCharImg(img,sx,groundYAt(wx),h,(wx%97)<48);
+  }
+}
 function drawForeground(){
   const start=Math.floor(cam.x/16)-1,end=start+Math.ceil(CONFIG.W/16)+3;
   for(let y=0;y<MAP_H;y++)for(let x=Math.max(0,start);x<Math.min(MAP_W,end);x++)if(tileSolid(x,y))drawTile(x,y);
+  drawScenery();
   // escombros capa frontal
   const ox=-((cam.x*.75)%96);
   for(let i=-1;i<6;i++){
