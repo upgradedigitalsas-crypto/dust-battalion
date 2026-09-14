@@ -1420,7 +1420,8 @@ function drawHUD(){
   drawSprite(SPRITES.icon_star,178,3,2);
   textPx("x"+game.hostages,196,6,1,PAL["W"]);
 
-  textPx(String(game.score).padStart(7,"0"),CONFIG.W-6,6,1,PAL["7"],"right");
+  cornerBracket(54,1,124,barH-4,PAL["M"],3);
+  textPx(String(game.score).padStart(7,"0"),CONFIG.W-6,4,2,PAL["K"],"right");
 
   if(player.inTank){
     drawPanel(4,barH+3,96,13,PAL["B"]);
