@@ -99,7 +99,8 @@ const objImages = {
   hostage:loadImg("assets/sprite-hostage.png"),
   crate:loadImg("assets/sprite-crate.png"),
   barrel:loadImg("assets/sprite-barrel.png"),
-  sandbags:loadImg("assets/sprite-sandbags.png")
+  sandbags:loadImg("assets/sprite-sandbags.png"),
+  explosion:loadImg("assets/sprite-explosion.png")
 };
 function imgReady(img){ return img && img.complete && img.naturalWidth>0; }
 // Rig de recorte estilo Spine: el torso se dibuja entero y las dos piernas se
@@ -794,8 +795,24 @@ class Bullet extends Entity{
     handleBulletHit(this);
   }
   draw(cam){
-    const sp=this.kind==="arc"?SPRITES.shell:this.kind==="tracer"?SPRITES.tracer:SPRITES.bullet;
-    drawSprite(sp,this.x-cam.x-4,this.y-4,1,this.vx<0);
+    if(this.kind==="arc"||this.kind==="cannon"){
+      const spr=this.kind==="arc"?SPRITES.shell:SPRITES.bullet;
+      drawSprite(spr,this.x-cam.x-4,this.y-4,this.kind==="cannon"?2:1,this.vx<0);
+      return;
+    }
+    const sp=Math.hypot(this.vx,this.vy)||1, nx=this.vx/sp, ny=this.vy/sp;
+    const enemy=this.team==="enemy", tracer=this.kind==="tracer";
+    const len=tracer?16:enemy?8:11, x=this.x-cam.x, y=this.y;
+    const core=enemy?"255,140,110":tracer?"255,200,90":"255,246,200";
+    const glow=enemy?"255,60,40":tracer?"255,120,30":"255,190,70";
+    ctx.save();
+    ctx.globalCompositeOperation="lighter"; ctx.lineCap="round";
+    ctx.strokeStyle=`rgba(${glow},0.5)`; ctx.lineWidth=tracer?4:3;
+    ctx.beginPath(); ctx.moveTo(x-nx*len,y-ny*len); ctx.lineTo(x,y); ctx.stroke();
+    ctx.strokeStyle=`rgba(${core},1)`; ctx.lineWidth=1.6;
+    ctx.beginPath(); ctx.moveTo(x-nx*len*0.6,y-ny*len*0.6); ctx.lineTo(x,y); ctx.stroke();
+    ctx.fillStyle=`rgba(${core},1)`; ctx.fillRect(Math.round(x)-1,Math.round(y)-1,2,2);
+    ctx.restore();
   }
 }
 class Grenade extends Entity{
@@ -830,7 +847,11 @@ class Particle extends Entity{
     else if(this.type==="casing"){
       ctx.globalAlpha=a;ctx.fillStyle=PAL["6"];ctx.fillRect(Math.round(this.x-cam.x),Math.round(this.y),1,2);ctx.globalAlpha=1;
     } else {
-      ctx.globalAlpha=a;ctx.fillStyle=Math.random()<.5?PAL["J"]:PAL["K"];ctx.fillRect(Math.round(this.x-cam.x),Math.round(this.y),2,2);ctx.globalAlpha=1;
+      const px=this.x-cam.x, py=this.y, v=Math.hypot(this.vx,this.vy)||1;
+      ctx.save();ctx.globalCompositeOperation="lighter";ctx.globalAlpha=a;
+      ctx.strokeStyle=Math.random()<.5?"#ffd36b":"#fff4b0";ctx.lineWidth=1.3;
+      ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(px-this.vx/v*4,py-this.vy/v*4);ctx.stroke();
+      ctx.restore();
     }
   }
 }
@@ -838,10 +859,39 @@ class Explosion extends Entity{
   constructor(x,y,big=false){super(x,y);this.t=0;this.big=big;this.life=big?0.48:0.30;}
   update(dt){this.t+=dt;if(this.t>=this.life)this.dead=true;}
   draw(cam){
-    const f=this.t/this.life<.33?SPRITES.expl1:this.t/this.life<.66?SPRITES.expl2:SPRITES.expl3;
+    const p=this.t/this.life, img=objImages.explosion;
+    if(imgReady(img)){
+      const base=this.big?66:42, sz=base*(0.55+0.6*Math.min(1,p*2.2));
+      ctx.save();
+      ctx.globalAlpha=p<0.6?1:Math.max(0,1-(p-0.6)/0.4);
+      ctx.translate(this.x-cam.x,this.y); ctx.rotate((((this.x*0.37)%1)-0.5)*0.5);
+      ctx.imageSmoothingEnabled=true;
+      ctx.drawImage(img,-sz/2,-sz/2,sz,sz);
+      ctx.restore();
+      return;
+    }
+    const f=p<.33?SPRITES.expl1:p<.66?SPRITES.expl2:SPRITES.expl3;
     const sc=this.big?3:2; drawSprite(f,this.x-cam.x-(f[0].length*sc)/2,this.y-(f.length*sc)/2,sc);
   }
 }
+class MuzzleFlash extends Entity{
+  constructor(x,y,nx,ny,size){super(x,y);this.nx=nx;this.ny=ny;this.size=size;this.t=0;this.life=0.06;this.jit=rnd(-0.25,0.25);}
+  update(dt){this.t+=dt;if(this.t>=this.life)this.dead=true;}
+  draw(cam){
+    const k=1-this.t/this.life, s=this.size*(0.75+0.25*k);
+    ctx.save();
+    ctx.globalCompositeOperation="lighter";
+    ctx.translate(this.x-cam.x,this.y); ctx.rotate(Math.atan2(this.ny,this.nx)+this.jit*0.3);
+    ctx.fillStyle=`rgba(255,200,90,${0.9*k})`;
+    ctx.beginPath(); ctx.moveTo(0,-s*0.35); ctx.lineTo(s*1.7,0); ctx.lineTo(0,s*0.35); ctx.closePath(); ctx.fill();
+    ctx.fillStyle=`rgba(255,140,40,${0.75*k})`;
+    ctx.beginPath(); ctx.moveTo(s*0.2,0); ctx.lineTo(s*0.75,-s*0.95); ctx.lineTo(s*0.55,0); ctx.lineTo(s*0.75,s*0.95); ctx.closePath(); ctx.fill();
+    ctx.fillStyle=`rgba(255,255,235,${k})`;
+    ctx.beginPath(); ctx.arc(s*0.15,0,s*0.4,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+}
+function muzzleFlash(x,y,nx,ny,size){ entities.push(new MuzzleFlash(x,y,nx,ny,size)); }
 class Item extends Entity{
   constructor(x,y,type){super(x,y);this.type=type;this.vy=-65;this.life=10;this.hb={x:-5,y:-5,w:10,h:10};}
   update(dt){
@@ -969,7 +1019,7 @@ class Turret extends Entity{
   update(dt){
     if(Math.abs(player.x-this.x)>190)return;
     this.cool-=dt;
-    if(this.cool<=0){this.cool=CONFIG.TURRET.fireRate;const dir=sign(player.x-this.x);entities.push(new Bullet(this.x+16+dir*16,this.y+7,dir*155,-10,"enemy",1));casing(this.x+14,this.y+7,dir);SFX.shot();addLight(this.x+16+dir*20,this.y+7,24,"255,170,80",0.07);}
+    if(this.cool<=0){this.cool=CONFIG.TURRET.fireRate;const dir=sign(player.x-this.x);entities.push(new Bullet(this.x+16+dir*16,this.y+7,dir*155,-10,"enemy",1));casing(this.x+14,this.y+7,dir);SFX.shot();addLight(this.x+16+dir*20,this.y+7,24,"255,170,80",0.07);muzzleFlash(this.x+16+dir*20,this.y+7,dir,0,6);}
   }
   draw(cam){
     if(imgReady(objImages.turret)){ drawCharImg(objImages.turret,this.x-cam.x+16,this.y+26,34,!(player.x<this.x)); return; }
@@ -1108,7 +1158,7 @@ class Player extends Entity{
     if((down("z","j")||gp?.fire)&&this.fireCd<=0&&!this.crouch){
       if(this.special>0){
         this.fireCd=CONFIG.SHOTGUN.fireRate;this.special--;SFX.shotgun();
-        addLight(this.x+14+aim.x*16,this.y+12+aim.y*8,34,"255,210,120",0.09);
+        addLight(this.x+14+aim.x*16,this.y+12+aim.y*8,34,"255,210,120",0.09);muzzleFlash(this.x+14+aim.x*14,this.y+12+aim.y*8,aim.x,aim.y,9);
         const base=Math.atan2(aim.y,aim.x);
         for(const s of [-CONFIG.SHOTGUN.spread,0,CONFIG.SHOTGUN.spread]){
           entities.push(new Bullet(this.x+14+aim.x*12,this.y+12+aim.y*7,Math.cos(base+s)*CONFIG.SHOTGUN.speed,Math.sin(base+s)*CONFIG.SHOTGUN.speed,"player",CONFIG.SHOTGUN.damage,"bullet"));
@@ -1116,12 +1166,12 @@ class Player extends Entity{
         casing(this.x+13,this.y+9,this.facing);
       } else if(this.rifleAmmo>0){
         this.fireCd=CONFIG.RIFLE.fireRate;this.rifleAmmo--;SFX.shot();
-        addLight(this.x+14+aim.x*16,this.y+12+aim.y*8,26,"255,190,90",0.07);
+        addLight(this.x+14+aim.x*16,this.y+12+aim.y*8,26,"255,190,90",0.07);muzzleFlash(this.x+14+aim.x*14,this.y+12+aim.y*8,aim.x,aim.y,6);
         entities.push(new Bullet(this.x+14+aim.x*12,this.y+12+aim.y*7,aim.x*CONFIG.RIFLE.speed,aim.y*CONFIG.RIFLE.speed,"player",CONFIG.RIFLE.damage,"tracer"));
         casing(this.x+13,this.y+9,this.facing);
       } else {
         this.fireCd=CONFIG.PLAYER.fireRate;SFX.shot();
-        addLight(this.x+14+aim.x*16,this.y+12+aim.y*8,24,"255,190,90",0.06);
+        addLight(this.x+14+aim.x*16,this.y+12+aim.y*8,24,"255,190,90",0.06);muzzleFlash(this.x+14+aim.x*14,this.y+12+aim.y*8,aim.x,aim.y,5);
         entities.push(new Bullet(this.x+14+aim.x*12,this.y+12+aim.y*7,aim.x*CONFIG.PISTOL.speed,aim.y*CONFIG.PISTOL.speed,"player",1,"bullet"));
         casing(this.x+13,this.y+9,this.facing);
       }
@@ -1174,7 +1224,7 @@ function aimVector(facing,L,R,U,D){
 function enemyShoot(e){
   const dx=(player.x+14)-(e.x+14),dy=(player.y+12)-(e.y+10),m=Math.hypot(dx,dy)||1;
   entities.push(new Bullet(e.x+14,e.y+10,dx/m*150,dy/m*150,"enemy",1));casing(e.x+12,e.y+8,sign(dx)||1);SFX.shot();
-  addLight(e.x+14+sign(dx)*10,e.y+10,22,"255,170,80",0.06);
+  addLight(e.x+14+sign(dx)*10,e.y+10,22,"255,170,80",0.06);muzzleFlash(e.x+14+sign(dx)*10,e.y+10,sign(dx)||1,0,5);
 }
 function enemyMelee(e){if(!player.inTank && Math.abs(player.x-e.x)<26 && Math.abs(player.y-e.y)<32)player.die();}
 function melee(p){
@@ -1228,7 +1278,11 @@ function explode(x,y,r,dmg,team="player",visual=true){
     }
   }
 }
-function impactPuff(x,y){for(let i=0;i<3;i++)particles.push(new Particle(x,y,rnd(-25,25),rnd(-45,-10),rnd(.12,.28)));}
+function impactPuff(x,y){
+  for(let i=0;i<7;i++){const a=rnd(0,Math.PI*2),v=rnd(40,120);particles.push(new Particle(x,y,Math.cos(a)*v,Math.sin(a)*v-30,rnd(.12,.3)));}
+  particles.push(new Particle(x,y,rnd(-8,8),rnd(-20,-8),.35,"smoke"));
+  addLight(x,y,16,"255,200,120",0.06);
+}
 function casing(x,y,dir=1){particles.push(new Particle(x,y,-dir*rnd(18,34),rnd(-72,-45),rnd(.55,.95),"casing"));}
 
 /* ============================================================
@@ -1404,23 +1458,34 @@ function update(dt){
    RENDER: PARALLAX + TILES + ENTIDADES
    ============================================================ */
 function zoneOf(worldX){ return worldX>CONFIG.WORLD.zone2Start?2:1; }
+const ZONE_BAND=260;
+// 0 = desierto, 1 = ciudad; transicion gradual alrededor de zone2Start
+function zoneBlend(worldX){ return clamp((worldX-(CONFIG.WORLD.zone2Start-ZONE_BAND/2))/ZONE_BAND,0,1); }
 function bgImageReady(z){
   const img=bgImages[z];
   return img && img.complete && img.naturalWidth>0;
 }
-function drawPaintedBg(z,destH){
+function drawPaintedBg(z,destH,alpha=1){
   const img=bgImages[z];
   const srcW=img.naturalWidth, srcH=img.naturalHeight;
   const scale=CONFIG.W/srcW;
   const srcCropH=Math.min(srcH, destH/scale);
+  ctx.save();
+  ctx.globalAlpha=alpha;
   ctx.imageSmoothingEnabled=true;
-  ctx.drawImage(img,0,0,srcW,srcCropH,0,0,CONFIG.W,destH);
-  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(img,0,0,srcW,srcCropH,0,0,CONFIG.W,srcCropH*scale);
+  ctx.restore();
 }
 function drawSky(){
   const z=zoneOf(cam.x);
   ctx.fillStyle=PAL[z===1?"4":"D"];ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
-  if(bgImageReady(z)){ drawPaintedBg(z,172); return; }
+  if(bgImageReady(1)&&bgImageReady(2)){
+    const t=zoneBlend(cam.x+CONFIG.W/2);
+    if(t<1) drawPaintedBg(1,CONFIG.H,1);
+    if(t>0) drawPaintedBg(2,CONFIG.H,t);
+    return;
+  }
+  if(bgImageReady(z)){ drawPaintedBg(z,CONFIG.H,1); return; }
   if(z===1){
     ctx.fillStyle=PAL["5"];ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
     // gradiente pixelado en franjas
@@ -1459,6 +1524,7 @@ function drawSky(){
 function drawMidground(){
   const z=zoneOf(cam.x);
   const hasImg=bgImageReady(z);
+  if(hasImg) return;  // con fondo pintado, la banda plana de dunas/niebla era la franja
   if(z===1){
     if(!hasImg){
     const ox=-((cam.x*.35)%240);
@@ -1498,26 +1564,30 @@ function drawMidground(){
     for(let x=-30-(cam.x*.18%50);x<CONFIG.W;x+=50){ctx.fillStyle=PAL["D"];ctx.fillRect(Math.floor(x),148,34,4);}
   }
 }
+function drawGroundTex(gimg,tx,ty,x,y,alpha){
+  // 16 px de juego se muestrean desde 48 px de textura: mas detalle por pixel
+  const K=3, tw=gimg.naturalWidth, th=gimg.naturalHeight, S=16*K;
+  const span=Math.max(1,tw-S);
+  let sx=(tx*S)%(span*2);
+  let mirror=false;
+  if(sx>span){ sx=span*2-sx; mirror=true; }   // espejo alterno: oculta la costura
+  const isTop=!tileSolid(tx,ty-1);
+  const sy=isTop?0:Math.min(th-S,S+((ty*7)%3)*S*0.5);
+  ctx.save();
+  ctx.globalAlpha=alpha;
+  ctx.imageSmoothingEnabled=true;
+  if(mirror){ ctx.translate(Math.round(x)+16,y); ctx.scale(-1,1); ctx.drawImage(gimg,sx,sy,S,S,0,0,16,16); }
+  else ctx.drawImage(gimg,sx,sy,S,S,Math.round(x),y,16,16);
+  ctx.restore();
+}
 function drawTile(tx,ty){
   const x=tx*16-cam.x,y=ty*16;
   const z=zoneOf(tx*16);
-  const gimg=groundImages[z];
-  if(imgReady(gimg)){
-    // 16 px de juego se muestrean desde 48 px de textura: mas detalle por pixel
-    const K=3, tw=gimg.naturalWidth, th=gimg.naturalHeight, S=16*K;
-    const span=Math.max(1,tw-S);
-    let sx=(tx*S)%(span*2);
-    let mirror=false;
-    if(sx>span){ sx=span*2-sx; mirror=true; }   // espejo alterno: oculta la costura
-    const isTop=!tileSolid(tx,ty-1);
-    const sy=isTop?0:Math.min(th-S,S+((ty*7)%3)*S*0.5);
-    ctx.save();
-    ctx.imageSmoothingEnabled=true;
-    if(mirror){ ctx.translate(Math.round(x)+16,y); ctx.scale(-1,1); ctx.drawImage(gimg,sx,sy,S,S,0,0,16,16); }
-    else ctx.drawImage(gimg,sx,sy,S,S,Math.round(x),y,16,16);
-    ctx.imageSmoothingEnabled=false;
-    ctx.restore();
-    if(isTop){
+  if(imgReady(groundImages[1])&&imgReady(groundImages[2])){
+    const t=zoneBlend(tx*16);
+    if(t<1) drawGroundTex(groundImages[1],tx,ty,x,y,1);
+    if(t>0) drawGroundTex(groundImages[2],tx,ty,x,y,t);
+    if(!tileSolid(tx,ty-1)){
       ctx.fillStyle="rgba(255,226,168,0.20)";ctx.fillRect(Math.round(x),y,16,2);
       ctx.fillStyle="rgba(0,0,0,0.18)";ctx.fillRect(Math.round(x),y+2,16,1);
     }
