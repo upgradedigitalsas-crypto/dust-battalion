@@ -73,31 +73,60 @@ const bgImages = {
   1: Object.assign(new Image(), {src:"assets/bg-desert.jpg"}),
   2: Object.assign(new Image(), {src:"assets/bg-city.jpg"})
 };
-function loadImg(src){ return Object.assign(new Image(), {src}); }
+function loadImg(src,rig){ const i=Object.assign(new Image(),{src}); i.rig=rig; return i; }
+// rig de recorte: linea de cadera, base del torso y pivote (en px del PNG de 300x300)
 const heroImages = [
-  {name:"BOINA ROJA", run:loadImg("assets/sprite-hero.png"), idle:loadImg("assets/sprite-hero_idle.png")},
-  {name:"GORRA VERDE", run:loadImg("assets/sprite-hero2.png"), idle:null},
-  {name:"BANDANA AZUL", run:loadImg("assets/sprite-hero3.png"), idle:null}
+  {name:"BOINA ROJA",
+   run:loadImg("assets/sprite-hero.png",{legtop:142,torsobot:166,pivx:102,pivy:152,split:102}),
+   idle:loadImg("assets/sprite-hero_idle.png")},
+  {name:"GORRA VERDE",
+   run:loadImg("assets/sprite-hero2.png",{legtop:127,torsobot:153,pivx:96,pivy:138,split:96}),
+   idle:null},
+  {name:"BANDANA AZUL",
+   run:loadImg("assets/sprite-hero3.png",{legtop:126,torsobot:153,pivx:99,pivy:138,split:99}),
+   idle:null}
 ];
-const enemyRifleImg = loadImg("assets/sprite-enemy_rifle.png");
-const enemyRunnerImg = loadImg("assets/sprite-enemy_runner.png");
+const enemyRifleImg = loadImg("assets/sprite-enemy_rifle.png",{legtop:143,torsobot:167,pivx:110,pivy:154,split:110});
+const enemyRunnerImg = loadImg("assets/sprite-enemy_runner.png",{legtop:157,torsobot:183,pivx:104,pivy:168,split:104});
+const objImages = {
+  tank:loadImg("assets/sprite-tank.png"),
+  turret:loadImg("assets/sprite-turret.png"),
+  boss:loadImg("assets/sprite-boss.png"),
+  hostage:loadImg("assets/sprite-hostage.png"),
+  crate:loadImg("assets/sprite-crate.png"),
+  barrel:loadImg("assets/sprite-barrel.png")
+};
 function imgReady(img){ return img && img.complete && img.naturalWidth>0; }
+// Rig de recorte estilo Spine: el torso se dibuja entero y las dos piernas se
+// recortan del mismo PNG y rotan en contrafase alrededor de la cadera, lo que
+// produce el ciclo de tijera de una carrera 2D con un solo dibujo de origen.
 function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
-  const w=h*(img.naturalWidth/img.naturalHeight);
-  // ciclo de carrera procedimental: rebote vertical + inclinacion + squash,
-  // ya que el sprite es una sola pose (principios de timing y arco de movimiento)
-  const phase=anim*Math.PI;
+  const sw=img.naturalWidth, sh=img.naturalHeight;
+  const k=h/sh, w=sw*k;
+  const phase=anim*Math.PI*0.6;
   const bob=moving?Math.abs(Math.sin(phase))*3:0;
-  const tilt=moving?Math.sin(phase*2)*0.06:0;
-  const squash=moving?1+Math.sin(phase*2)*0.035:1;
-  const yy=y-bob;
   ctx.save();
   ctx.imageSmoothingEnabled=true;
-  const dir=flip?-1:1;
-  ctx.translate(Math.round(x),Math.round(yy));
-  ctx.scale(dir*squash,1/squash);
-  ctx.rotate(tilt*dir);
-  ctx.drawImage(img,-w/2,-h,w,h);
+  ctx.translate(Math.round(x),Math.round(y-bob));
+  if(flip)ctx.scale(-1,1);
+  const left=-w/2, topY=-h;
+  const rig=img.rig;
+  if(moving&&rig){
+    const ang=Math.sin(phase)*0.30;
+    const pivX=left+rig.pivx*k, pivY=topY+rig.pivy*k;
+    const legY=topY+rig.legtop*k, legH=(sh-rig.legtop)*k;
+    for(const [sx,swid,a,dark] of [[0,rig.split,-ang,true],[rig.split,sw-rig.split,ang,false]]){
+      ctx.save();
+      ctx.translate(pivX,pivY); ctx.rotate(a); ctx.translate(-pivX,-pivY);
+      if(dark)ctx.filter="brightness(0.72)";
+      ctx.drawImage(img,sx,rig.legtop,swid,sh-rig.legtop,left+sx*k,legY,swid*k,legH);
+      ctx.filter="none";
+      ctx.restore();
+    }
+    ctx.drawImage(img,0,0,sw,rig.torsobot,left,topY,w,rig.torsobot*k);
+  } else {
+    ctx.drawImage(img,left,topY,w,h);
+  }
   ctx.imageSmoothingEnabled=false;
   ctx.restore();
 }
@@ -543,6 +572,7 @@ const FONT={
 ":":["000","010","000","010","000"],"/":["001","001","010","100","100"],
 "-":["000","000","111","000","000"],"+":["000","010","111","010","000"],
 "!":["010","010","010","000","010"],".":["000","000","000","000","010"],
+"<":["001","010","100","010","001"],">":["100","010","001","010","100"],
 " ":["000","000","000","000","000"]
 };
 function textPx(str,x,y,scale=1,color=PAL["7"],align="left"){
@@ -658,7 +688,7 @@ function noise(dur=0.08,vol=0.2){
   s.connect(g); g.connect(master); s.start();
 }
 const sfxClips={};
-for(const n of ["shot","boom","jump","pickup","knife","death"]){
+for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm"]){
   const a=new Audio("assets/sfx/"+n+".mp3"); a.preload="auto"; sfxClips[n]=a;
 }
 function playClip(name,vol){
@@ -667,13 +697,14 @@ function playClip(name,vol){
 }
 const SFX={
   shot(){playClip("shot",0.5);},
-  shotgun(){noise(0.10,0.3);playClip("shot",0.6);},
+  shotgun(){playClip("shotgun",0.6);},
   jump(){playClip("jump",0.45);},
   boom(){playClip("boom",0.6);},
   death(){playClip("death",0.55);},
   knife(){playClip("knife",0.5);},
   pickup(){playClip("pickup",0.5);},
-  boss(){tone(55,0.35,"sawtooth",0.24,20);},
+  boss(){playClip("alarm",0.55);},
+  rescue(){playClip("rescue",0.55);},
   step(){tone(85,0.045,"square",0.05,-25);}
 };
 const LEAD_NOTES=[130,130,146,164,146,130,110,98,130,146,164,196,175,164,146,110];
@@ -828,16 +859,22 @@ class Crate extends Entity{
       entities.push(new Item(this.x+14,this.y+5,type));
     }
   }
-  draw(cam){drawSprite(SPRITES.crate,this.x-cam.x,this.y,2);}
+  draw(cam){
+    if(imgReady(objImages.crate)){ drawCharImg(objImages.crate,this.x-cam.x+14,this.y+30,32,false); return; }
+    drawSprite(SPRITES.crate,this.x-cam.x,this.y,2);
+  }
 }
 class Hostage extends Entity{
   constructor(x,y){super(x,y);this.freed=false;this.hb={x:3,y:2,w:22,h:28};}
   free(){
-    if(this.freed)return;this.freed=true;game.hostages++;game.score+=500;SFX.pickup();
+    if(this.freed)return;this.freed=true;game.hostages++;game.score+=500;SFX.rescue();
     const r=Math.random();entities.push(new Item(this.x+14,this.y+2,r<.34?"shotgun":r<.67?"grenade":"score"));
   }
   update(dt){if(this.freed){this.vx=24;this.vy+=500*dt;collideWorld(this,dt);if(this.x>player.x+220)this.dead=true;}}
-  draw(cam){drawSprite(SPRITES.hostage,this.x-cam.x,this.y,2,this.freed);}
+  draw(cam){
+    if(imgReady(objImages.hostage)){ drawCharImg(objImages.hostage,this.x-cam.x+14,this.y+32,38,this.freed,this.anim,this.freed); return; }
+    drawSprite(SPRITES.hostage,this.x-cam.x,this.y,2,this.freed);
+  }
 }
 class EnemyDeathFx extends Entity{
   constructor(x,y,flip,type){
@@ -927,9 +964,12 @@ class Turret extends Entity{
   update(dt){
     if(Math.abs(player.x-this.x)>190)return;
     this.cool-=dt;
-    if(this.cool<=0){this.cool=CONFIG.TURRET.fireRate;const dir=sign(player.x-this.x);entities.push(new Bullet(this.x+16+dir*16,this.y+7,dir*155,-10,"enemy",1));casing(this.x+14,this.y+7,dir);SFX.shot();}
+    if(this.cool<=0){this.cool=CONFIG.TURRET.fireRate;const dir=sign(player.x-this.x);entities.push(new Bullet(this.x+16+dir*16,this.y+7,dir*155,-10,"enemy",1));casing(this.x+14,this.y+7,dir);SFX.shot();addLight(this.x+16+dir*20,this.y+7,24,"255,170,80",0.07);}
   }
-  draw(cam){drawSprite(SPRITES.turret,this.x-cam.x,this.y,2,player.x<this.x);}
+  draw(cam){
+    if(imgReady(objImages.turret)){ drawCharImg(objImages.turret,this.x-cam.x+16,this.y+26,34,!(player.x<this.x)); return; }
+    drawSprite(SPRITES.turret,this.x-cam.x,this.y,2,player.x<this.x);
+  }
 }
 class Tank extends Entity{
   constructor(x,y){super(x,y);this.armor=CONFIG.TANK.armor;this.active=false;this.hb={x:2,y:8,w:38,h:24};this.fireCd=0;this.cannonCd=0;}
@@ -966,7 +1006,10 @@ class Tank extends Entity{
       player.x=this.x;player.y=this.y-30;player.vy=-130;player.invuln=1.0;
     }
   }
-  draw(cam){drawSprite(SPRITES.tank,this.x-cam.x,this.y,2,this.flip);}
+  draw(cam){
+    if(imgReady(objImages.tank)){ drawCharImg(objImages.tank,this.x-cam.x+20,this.y+34,46,!this.flip); return; }
+    drawSprite(SPRITES.tank,this.x-cam.x,this.y,2,this.flip);
+  }
 }
 class Boss extends Entity{
   constructor(x,y){
@@ -1007,7 +1050,8 @@ class Boss extends Entity{
     }
   }
   draw(cam){
-    drawSprite(SPRITES.boss,this.x-cam.x,this.y,2,this.dir>0);
+    if(imgReady(objImages.boss)){ drawCharImg(objImages.boss,this.x-cam.x+36,this.y+58,64,this.dir>0); }
+    else drawSprite(SPRITES.boss,this.x-cam.x,this.y,2,this.dir>0);
     if(this.phase>=2){ // lanzamisiles laterales
       ctx.fillStyle=PAL["0"];ctx.fillRect(Math.round(this.x-cam.x-4),Math.round(this.y+25),8,4);
       ctx.fillStyle=PAL["H"];ctx.fillRect(Math.round(this.x-cam.x-3),Math.round(this.y+26),5,2);
@@ -1059,6 +1103,7 @@ class Player extends Entity{
     if((down("z","j")||gp?.fire)&&this.fireCd<=0&&!this.crouch){
       if(this.special>0){
         this.fireCd=CONFIG.SHOTGUN.fireRate;this.special--;SFX.shotgun();
+        addLight(this.x+14+aim.x*16,this.y+12+aim.y*8,34,"255,210,120",0.09);
         const base=Math.atan2(aim.y,aim.x);
         for(const s of [-CONFIG.SHOTGUN.spread,0,CONFIG.SHOTGUN.spread]){
           entities.push(new Bullet(this.x+14+aim.x*12,this.y+12+aim.y*7,Math.cos(base+s)*CONFIG.SHOTGUN.speed,Math.sin(base+s)*CONFIG.SHOTGUN.speed,"player",CONFIG.SHOTGUN.damage,"bullet"));
@@ -1066,10 +1111,12 @@ class Player extends Entity{
         casing(this.x+13,this.y+9,this.facing);
       } else if(this.rifleAmmo>0){
         this.fireCd=CONFIG.RIFLE.fireRate;this.rifleAmmo--;SFX.shot();
+        addLight(this.x+14+aim.x*16,this.y+12+aim.y*8,26,"255,190,90",0.07);
         entities.push(new Bullet(this.x+14+aim.x*12,this.y+12+aim.y*7,aim.x*CONFIG.RIFLE.speed,aim.y*CONFIG.RIFLE.speed,"player",CONFIG.RIFLE.damage,"tracer"));
         casing(this.x+13,this.y+9,this.facing);
       } else {
         this.fireCd=CONFIG.PLAYER.fireRate;SFX.shot();
+        addLight(this.x+14+aim.x*16,this.y+12+aim.y*8,24,"255,190,90",0.06);
         entities.push(new Bullet(this.x+14+aim.x*12,this.y+12+aim.y*7,aim.x*CONFIG.PISTOL.speed,aim.y*CONFIG.PISTOL.speed,"player",1,"bullet"));
         casing(this.x+13,this.y+9,this.facing);
       }
@@ -1122,6 +1169,7 @@ function aimVector(facing,L,R,U,D){
 function enemyShoot(e){
   const dx=(player.x+14)-(e.x+14),dy=(player.y+12)-(e.y+10),m=Math.hypot(dx,dy)||1;
   entities.push(new Bullet(e.x+14,e.y+10,dx/m*150,dy/m*150,"enemy",1));casing(e.x+12,e.y+8,sign(dx)||1);SFX.shot();
+  addLight(e.x+14+sign(dx)*10,e.y+10,22,"255,170,80",0.06);
 }
 function enemyMelee(e){if(!player.inTank && Math.abs(player.x-e.x)<26 && Math.abs(player.y-e.y)<32)player.die();}
 function melee(p){
@@ -1150,6 +1198,8 @@ function handleBulletHit(b){
 }
 function explode(x,y,r,dmg,team="player",visual=true){
   if(visual!==false)entities.push(new Explosion(x,y,r>35));SFX.boom();shake(r>35?6:3,r>35?.18:.09);
+  addLight(x,y,r*2.4,"255,170,60",r>35?0.45:0.3);
+  flashScreen(r>35?0.5:0.22);
   for(let i=0;i<8;i++)particles.push(new Particle(x,y,rnd(-90,90),rnd(-120,20),rnd(.25,.7),Math.random()<.35?"smoke":"spark"));
 
   if(team==="enemy"){
@@ -1225,6 +1275,44 @@ class MortarWarning{
    ESTADO GLOBAL
    ============================================================ */
 let entities=[],particles=[],player=null,boss=null,ambushSpawnTimer=0,ambushCount=0;
+
+/* ============================================================
+   LUCES DINAMICAS — fogonazos y explosiones que iluminan la escena
+   (composicion aditiva sobre el mundo, antes del HUD)
+   ============================================================ */
+let lights=[], screenFlash=0;
+function addLight(x,y,r,rgb,life){ lights.push({x,y,r,rgb,life,max:life}); }
+function flashScreen(v){ screenFlash=Math.max(screenFlash,v); }
+function updateLights(dt){
+  for(const l of lights) l.life-=dt;
+  if(lights.length) lights=lights.filter(l=>l.life>0);
+  screenFlash=Math.max(0,screenFlash-dt*2.2);
+}
+function drawLights(cam){
+  if(!lights.length) return;
+  ctx.save();
+  ctx.globalCompositeOperation="lighter";
+  for(const l of lights){
+    const t=clamp(l.life/l.max,0,1);
+    const r=l.r*(0.55+0.45*t), cx=l.x-cam.x, cy=l.y;
+    if(cx<-r||cx>CONFIG.W+r) continue;
+    const g=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+    g.addColorStop(0,`rgba(${l.rgb},${(0.5*t).toFixed(3)})`);
+    g.addColorStop(0.55,`rgba(${l.rgb},${(0.16*t).toFixed(3)})`);
+    g.addColorStop(1,`rgba(${l.rgb},0)`);
+    ctx.fillStyle=g;
+    ctx.fillRect(cx-r,cy-r,r*2,r*2);
+  }
+  ctx.restore();
+}
+function drawScreenFlash(){
+  if(screenFlash<=0.01) return;
+  ctx.save();
+  ctx.globalCompositeOperation="lighter";
+  ctx.fillStyle=`rgba(255,205,140,${(screenFlash*0.45).toFixed(3)})`;
+  ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
+  ctx.restore();
+}
 const cam={x:0,shakeT:0,shakeMag:0,sx:0,sy:0};
 const game={
   state:"TITLE",paused:false,score:0,hostages:0,continues:CONFIG.CONTINUES,runTime:0,clearTime:0,checkpoint:48,charIndex:0
@@ -1249,9 +1337,14 @@ function update(dt){
   musicTick(dt);
   if(hit("p")&&game.state==="PLAY")game.paused=!game.paused;
   if(game.state==="TITLE"){
+    if(hit("z","j","enter"))game.state="CHARSELECT";
+    clearPressed();return;
+  }
+  if(game.state==="CHARSELECT"){
     if(hit("arrowleft","a"))game.charIndex=(game.charIndex+heroImages.length-1)%heroImages.length;
     if(hit("arrowright","d"))game.charIndex=(game.charIndex+1)%heroImages.length;
     if(hit("z","j","enter"))startGame(true);
+    if(hit("x","k"))game.state="TITLE";
     clearPressed();return;
   }
   if(game.state==="GAMEOVER"){
@@ -1265,6 +1358,7 @@ function update(dt){
   if(game.paused){clearPressed();return;}
 
   game.runTime+=dt;
+  updateLights(dt);
   player.update(dt);
   for(const e of entities) if(!e.dead)e.update(dt);
   for(const p of particles) if(!p.dead)p.update(dt);
@@ -1438,9 +1532,12 @@ function render(){
   for(const e of renderList)e.draw(cam);
   player?.draw(cam);
   for(const p of particles)p.draw(cam);
+  drawLights(cam);
   ctx.restore();
+  drawScreenFlash();
   drawHUD();
   if(game.state==="TITLE")drawTitle();
+  if(game.state==="CHARSELECT")drawCharSelect();
   if(game.state==="GAMEOVER")drawGameOver();
   if(game.state==="RESULTS")drawResults();
   if(game.paused){
@@ -1503,16 +1600,43 @@ function drawTitle(){
   textPx("BATTALION",CONFIG.W/2+1,95,4,PAL["G"],"center");
   textPx("BATTALION",CONFIG.W/2,94,4,PAL["7"],"center");
   textPx("RUN AND GUN PROTOTYPE",CONFIG.W/2,124,1,PAL["W"],"center");
-
-  const hc=heroImages[game.charIndex];
-  if(hc&&imgReady(hc.run))drawCharImg(hc.run,CONFIG.W/2-70,157,34,false);
-  textPx("< "+hc.name+" >",CONFIG.W/2+14,138,1,PAL["6"],"center");
-  if(blinkOn())textPx("Z O J PARA EMPEZAR",CONFIG.W/2+14,150,1,PAL["J"],"center");
+  if(blinkOn())textPx("Z O J PARA CONTINUAR",CONFIG.W/2,148,1,PAL["J"],"center");
 
   drawPanel(46,164,CONFIG.W-92,44,PAL["D"]);
   cornerBracket(46,164,CONFIG.W-92,44,PAL["F"],5);
   textPx("FLECHAS/WASD MOVER  Z DISPARO  X SALTO",CONFIG.W/2,175,1,PAL["7"],"center");
   textPx("C GRANADA  SHIFT CUCHILLO  P PAUSA",CONFIG.W/2,187,1,PAL["7"],"center");
+}
+function drawCharSelect(){
+  ctx.fillStyle=PAL["0"];ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
+  hazardStripes(0,0,CONFIG.W,6,1);
+  hazardStripes(0,CONFIG.H-6,CONFIG.W,6,1);
+  textPx("SELECCIONA TU SOLDADO",CONFIG.W/2+1,15,2,PAL["G"],"center");
+  textPx("SELECCIONA TU SOLDADO",CONFIG.W/2,14,2,PAL["K"],"center");
+
+  const n=heroImages.length, boxW=100, gap=10;
+  const totalW=boxW*n+gap*(n-1);
+  const startX=(CONFIG.W-totalW)/2, boxY=36, boxH=148;
+
+  for(let i=0;i<n;i++){
+    const bx=startX+i*(boxW+gap);
+    const sel=i===game.charIndex;
+    const accent=sel?PAL["K"]:PAL["M"];
+    drawPanel(bx,boxY,boxW,boxH,accent);
+    cornerBracket(bx-(sel?2:0),boxY-(sel?2:0),boxW+(sel?4:0),boxH+(sel?4:0),accent,sel?7:4);
+    const hc=heroImages[i];
+    if(hc&&imgReady(hc.run))drawCharImg(hc.run,bx+boxW/2,boxY+116,80,false);
+    textPx(hc?hc.name:"?",bx+boxW/2,boxY+boxH-13,1,sel?PAL["K"]:PAL["7"],"center");
+    if(sel){
+      const arrowY=boxY+boxH/2;
+      if(blinkOn()){
+        textPx("<",bx-8,arrowY,1,PAL["K"],"right");
+        textPx(">",bx+boxW+8,arrowY,1,PAL["K"]);
+      }
+    }
+  }
+  if(blinkOn())textPx("Z CONFIRMAR",CONFIG.W/2,CONFIG.H-16,1,PAL["J"],"center");
+  textPx("X VOLVER",CONFIG.W/2,CONFIG.H-28,1,PAL["7"],"center");
 }
 function drawGameOver(){
   ctx.fillStyle="rgba(10,4,3,.72)";ctx.fillRect(0,0,CONFIG.W,CONFIG.H);

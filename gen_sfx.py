@@ -31,12 +31,28 @@ def generate(key, prompt, duration, out_path):
     print("saved", out_path, len(audio), "bytes")
 
 SFX = {
-    "shot": ("Single sharp retro arcade pistol gunshot, punchy, short, 8-bit war game sound effect", 0.6),
-    "boom": ("Big punchy retro arcade explosion, deep boom with crackle, short, 8-bit war game sound effect", 1.2),
-    "jump": ("Retro arcade video game jump sound, short upward whoosh blip, 8-bit style", 0.5),
-    "pickup": ("Cheerful retro arcade item pickup chime, short ascending blips, 8-bit style", 0.5),
-    "knife": ("Quick sharp retro arcade knife slash whoosh, short, 8-bit war game sound effect", 0.5),
-    "death": ("Retro arcade character death sound, descending sad blip, short, 8-bit style", 0.6),
+    "shot": ("Dry punchy arcade cabinet pistol gunshot, tight snappy crack with "
+             "a very short metallic tail, no reverb, loud and close, classic "
+             "16-bit run and gun arcade game", 0.5),
+    "shotgun": ("Heavy arcade shotgun blast, thick low punch with a bright "
+                "crack and a quick shell-pump click, dry, classic 16-bit run "
+                "and gun arcade game", 0.7),
+    "boom": ("Big dry arcade explosion, deep thumping low boom with bright "
+             "crackling debris on top, punchy attack, short tail, classic "
+             "16-bit run and gun arcade game", 1.1),
+    "jump": ("Short arcade jump sound, quick upward pitched blip with a small "
+             "whoosh, dry, classic 16-bit arcade game", 0.5),
+    "pickup": ("Bright arcade power-up pickup jingle, three quick ascending "
+               "coin-like chimes, cheerful, classic 16-bit arcade game", 0.6),
+    "knife": ("Fast metallic arcade knife slash, sharp steel whoosh with a "
+              "short ring, dry, classic 16-bit arcade game", 0.5),
+    "death": ("Arcade player death sting, dramatic short descending tone with "
+              "a low thud, classic 16-bit run and gun arcade game", 0.8),
+    "rescue": ("Short triumphant arcade fanfare for rescuing a prisoner, "
+               "bright ascending horns and a chime, classic 16-bit arcade "
+               "game", 1.0),
+    "alarm": ("Menacing arcade boss warning alarm, low pulsing siren with "
+              "metallic tension, classic 16-bit arcade game", 1.2),
 }
 
 if __name__ == "__main__":

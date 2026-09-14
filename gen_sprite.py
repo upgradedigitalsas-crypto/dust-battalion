@@ -71,6 +71,20 @@ PROMPTS = {
         "green combat helmet, khaki desert uniform, brown boots, facing "
         "left, slightly ominous"
     ),
+    "hero_run_strip": (
+        "Sprite sheet strip for a retro run-and-gun arcade video game, "
+        "richly shaded pixel art in the style of 1990s Neo Geo sprites, crisp "
+        "clean outlines. EXACTLY FOUR frames of the SAME character in a single "
+        "horizontal row, evenly spaced with clear gaps between frames, all "
+        "frames identical in scale, proportions, colors and camera angle. The "
+        "character: a tough male commando soldier with a red beret, olive "
+        "tactical vest over tan shirt, khaki cargo pants, brown boots, tan "
+        "skin, holding a pistol pointed forward, facing right. The four frames "
+        "are a running cycle: frame 1 right foot forward contact, frame 2 legs "
+        "passing under the body, frame 3 left foot forward contact, frame 4 "
+        "legs passing under the body mid-air. Transparent background, no text, "
+        "no numbers, no labels, no watermark, no grid lines"
+    ),
     "enemy_runner": (
         f"{STYLE}. An enemy grunt soldier charging forward with a combat "
         "knife raised, wearing a tan pith helmet, khaki desert uniform, "
@@ -83,4 +97,5 @@ if __name__ == "__main__":
     name = sys.argv[1]
     out = os.path.expanduser(f"~/dust-battalion/assets/sprite-{name}.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    generate(key, PROMPTS[name], "1024x1024", out)
+    size = "1536x1024" if name.endswith("_strip") else "1024x1024"
+    generate(key, PROMPTS[name], size, out)
