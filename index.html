@@ -69,6 +69,11 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d", {alpha:false});
 ctx.imageSmoothingEnabled = false;
 
+const bgImages = {
+  1: Object.assign(new Image(), {src:"assets/bg-desert.jpg"}),
+  2: Object.assign(new Image(), {src:"assets/bg-city.jpg"})
+};
+
 function resizeCanvas(){
   const s = Math.max(1, Math.floor(Math.min(innerWidth/CONFIG.W, innerHeight/CONFIG.H)));
   canvas.style.width = (CONFIG.W*s)+"px";
@@ -1247,8 +1252,23 @@ function update(dt){
    RENDER: PARALLAX + TILES + ENTIDADES
    ============================================================ */
 function zoneOf(worldX){ return worldX>CONFIG.WORLD.zone2Start?2:1; }
+function bgImageReady(z){
+  const img=bgImages[z];
+  return img && img.complete && img.naturalWidth>0;
+}
+function drawPaintedBg(z,destH){
+  const img=bgImages[z];
+  const srcW=img.naturalWidth, srcH=img.naturalHeight;
+  const scale=CONFIG.W/srcW;
+  const srcCropH=Math.min(srcH, destH/scale);
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(img,0,0,srcW,srcCropH,0,0,CONFIG.W,destH);
+  ctx.imageSmoothingEnabled=false;
+}
 function drawSky(){
   const z=zoneOf(cam.x);
+  ctx.fillStyle=PAL[z===1?"4":"D"];ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
+  if(bgImageReady(z)){ drawPaintedBg(z,172); return; }
   if(z===1){
     ctx.fillStyle=PAL["5"];ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
     // gradiente pixelado en franjas
@@ -1286,7 +1306,9 @@ function drawSky(){
 }
 function drawMidground(){
   const z=zoneOf(cam.x);
+  const hasImg=bgImageReady(z);
   if(z===1){
+    if(!hasImg){
     const ox=-((cam.x*.35)%240);
     for(let j=-1;j<4;j++){
       const base=Math.floor(ox+j*240);
@@ -1299,10 +1321,12 @@ function drawMidground(){
       ctx.fillStyle=PAL["1"];
       ctx.fillRect(base+26,136,12,26);ctx.fillRect(base+165,126,12,36);
     }
+    }
     // dunas
     ctx.fillStyle=PAL["4"];ctx.fillRect(0,152,CONFIG.W,24);
     for(let x=-30-(cam.x*.18%50);x<CONFIG.W;x+=50){ctx.fillStyle=PAL["5"];ctx.fillRect(Math.floor(x),148,34,4);}
   } else {
+    if(!hasImg){
     // skyline de ciudad bombardeada
     const ox=-((cam.x*.35)%220);
     for(let j=-1;j<5;j++){
@@ -1315,6 +1339,7 @@ function drawMidground(){
       }
       ctx.fillStyle=PAL["1"];
       ctx.fillRect(base+46,48,10,10);ctx.fillRect(base+8,120,10,42);
+    }
     }
     // niebla de guerra sobre el suelo
     ctx.fillStyle=PAL["E"];ctx.fillRect(0,152,CONFIG.W,24);
