@@ -73,6 +73,34 @@ const bgImages = {
   1: Object.assign(new Image(), {src:"assets/bg-desert.jpg"}),
   2: Object.assign(new Image(), {src:"assets/bg-city.jpg"})
 };
+function loadImg(src){ return Object.assign(new Image(), {src}); }
+const heroImages = [
+  {name:"BOINA ROJA", run:loadImg("assets/sprite-hero.png"), idle:loadImg("assets/sprite-hero_idle.png")},
+  {name:"GORRA VERDE", run:loadImg("assets/sprite-hero2.png"), idle:null},
+  {name:"BANDANA AZUL", run:loadImg("assets/sprite-hero3.png"), idle:null}
+];
+const enemyRifleImg = loadImg("assets/sprite-enemy_rifle.png");
+const enemyRunnerImg = loadImg("assets/sprite-enemy_runner.png");
+function imgReady(img){ return img && img.complete && img.naturalWidth>0; }
+function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
+  const w=h*(img.naturalWidth/img.naturalHeight);
+  // ciclo de carrera procedimental: rebote vertical + inclinacion + squash,
+  // ya que el sprite es una sola pose (principios de timing y arco de movimiento)
+  const phase=anim*Math.PI;
+  const bob=moving?Math.abs(Math.sin(phase))*3:0;
+  const tilt=moving?Math.sin(phase*2)*0.06:0;
+  const squash=moving?1+Math.sin(phase*2)*0.035:1;
+  const yy=y-bob;
+  ctx.save();
+  ctx.imageSmoothingEnabled=true;
+  const dir=flip?-1:1;
+  ctx.translate(Math.round(x),Math.round(yy));
+  ctx.scale(dir*squash,1/squash);
+  ctx.rotate(tilt*dir);
+  ctx.drawImage(img,-w/2,-h,w,h);
+  ctx.imageSmoothingEnabled=false;
+  ctx.restore();
+}
 
 function resizeCanvas(){
   const s = Math.max(1, Math.floor(Math.min(innerWidth/CONFIG.W, innerHeight/CONFIG.H)));
@@ -629,14 +657,22 @@ function noise(dur=0.08,vol=0.2){
   s.buffer=b; g.gain.setValueAtTime(vol,audio.currentTime); g.gain.exponentialRampToValueAtTime(0.001,audio.currentTime+dur);
   s.connect(g); g.connect(master); s.start();
 }
+const sfxClips={};
+for(const n of ["shot","boom","jump","pickup","knife","death"]){
+  const a=new Audio("assets/sfx/"+n+".mp3"); a.preload="auto"; sfxClips[n]=a;
+}
+function playClip(name,vol){
+  const src=sfxClips[name]; if(!src) return;
+  const p=src.cloneNode(); p.volume=vol; p.play().catch(()=>{});
+}
 const SFX={
-  shot(){tone(190,0.05,"square",0.12,-60);},
-  shotgun(){noise(0.10,0.3);tone(100,0.08,"square",0.12,-40);},
-  jump(){tone(240,0.10,"square",0.12,120);},
-  boom(){noise(0.24,0.45);tone(72,0.22,"sawtooth",0.25,-35);},
-  death(){tone(170,0.35,"sawtooth",0.18,-130);},
-  knife(){noise(0.04,0.12);tone(440,0.05,"square",0.08,-120);},
-  pickup(){tone(520,0.06,"square",0.1,140); setTimeout(()=>tone(720,0.08,"square",0.08,80),55);},
+  shot(){playClip("shot",0.5);},
+  shotgun(){noise(0.10,0.3);playClip("shot",0.6);},
+  jump(){playClip("jump",0.45);},
+  boom(){playClip("boom",0.6);},
+  death(){playClip("death",0.55);},
+  knife(){playClip("knife",0.5);},
+  pickup(){playClip("pickup",0.5);},
   boss(){tone(55,0.35,"sawtooth",0.24,20);},
   step(){tone(85,0.045,"square",0.05,-25);}
 };
@@ -872,6 +908,14 @@ class Enemy extends Entity{
     this.flip=dx<0;this.vy+=CONFIG.PLAYER.gravity*dt;collideWorld(this,dt);
   }
   draw(cam){
+    if(this.type==="rifle"&&imgReady(enemyRifleImg)){
+      drawCharImg(enemyRifleImg,this.x-cam.x+14,this.y+31,40,this.flip,this.anim,Math.abs(this.vx)>4);
+      return;
+    }
+    if(this.type==="runner"&&imgReady(enemyRunnerImg)){
+      drawCharImg(enemyRunnerImg,this.x-cam.x+14,this.y+31,40,this.flip,this.anim,Math.abs(this.vx)>4);
+      return;
+    }
     let sp=this.type==="rifle"?SPRITES.rifle:((Math.floor(this.anim)%2)?SPRITES.enemy_run1:SPRITES.enemy_run2);
     if(this.state==="idle")sp=SPRITES.enemy_idle;
     drawSprite(sp,this.x-cam.x,this.y,2,this.flip);
@@ -979,7 +1023,7 @@ class Player extends Entity{
   constructor(x,y){
     super(x,y);this.hb={x:6,y:2,w:16,h:29};this.lives=CONFIG.PLAYER.lives;this.grenades=CONFIG.PLAYER.grenadeCount;
     this.special=0;this.rifleAmmo=0;this.fireCd=0;this.knifeCd=0;this.knifeT=0;this.invuln=1;this.facing=1;this.inTank=null;this.crouch=false;
-    this.lastStep=-1;
+    this.lastStep=-1;this.charIndex=game.charIndex||0;
   }
   die(){
     if(this.invuln>0||game.state!=="PLAY"||this.inTank)return;
@@ -1039,13 +1083,20 @@ class Player extends Entity{
   draw(cam){
     if(this.inTank)return;
     if(this.invuln>0&&Math.floor(this.invuln*14)%2===0)return;
-    let sp=SPRITES.player_idle;
-    if(this.crouch)sp=SPRITES.player_crouch;
-    else if(Math.abs(this.vx)>8){
-      const rf=[SPRITES.player_run1,SPRITES.player_run2,SPRITES.player_run3,SPRITES.player_run4];
-      sp=rf[Math.floor(this.anim)%4];
+    const hc=heroImages[this.charIndex];
+    const moving=Math.abs(this.vx)>8;
+    const charImg=!this.crouch&&hc&&(moving?hc.run:(hc.idle||hc.run));
+    if(charImg&&imgReady(charImg)){
+      drawCharImg(charImg,this.x-cam.x+14,this.y+32,44,this.facing<0,this.anim,moving);
+    } else {
+      let sp=SPRITES.player_idle;
+      if(this.crouch)sp=SPRITES.player_crouch;
+      else if(moving){
+        const rf=[SPRITES.player_run1,SPRITES.player_run2,SPRITES.player_run3,SPRITES.player_run4];
+        sp=rf[Math.floor(this.anim)%4];
+      }
+      drawSprite(sp,this.x-cam.x,this.y,2,this.facing<0);
     }
-    drawSprite(sp,this.x-cam.x,this.y,2,this.facing<0);
     if(this.knifeT>0){
       ctx.fillStyle=PAL["O"];
       const kx=this.x-cam.x+(this.facing>0?27:-7),ky=this.y+12;
@@ -1176,7 +1227,7 @@ class MortarWarning{
 let entities=[],particles=[],player=null,boss=null,ambushSpawnTimer=0,ambushCount=0;
 const cam={x:0,shakeT:0,shakeMag:0,sx:0,sy:0};
 const game={
-  state:"TITLE",paused:false,score:0,hostages:0,continues:CONFIG.CONTINUES,runTime:0,clearTime:0,checkpoint:48
+  state:"TITLE",paused:false,score:0,hostages:0,continues:CONFIG.CONTINUES,runTime:0,clearTime:0,checkpoint:48,charIndex:0
 };
 function startGame(full=true){
   if(full){game.score=0;game.hostages=0;game.continues=CONFIG.CONTINUES;game.runTime=0;}
@@ -1198,6 +1249,8 @@ function update(dt){
   musicTick(dt);
   if(hit("p")&&game.state==="PLAY")game.paused=!game.paused;
   if(game.state==="TITLE"){
+    if(hit("arrowleft","a"))game.charIndex=(game.charIndex+heroImages.length-1)%heroImages.length;
+    if(hit("arrowright","d"))game.charIndex=(game.charIndex+1)%heroImages.length;
     if(hit("z","j","enter"))startGame(true);
     clearPressed();return;
   }
@@ -1451,7 +1504,10 @@ function drawTitle(){
   textPx("BATTALION",CONFIG.W/2,94,4,PAL["7"],"center");
   textPx("RUN AND GUN PROTOTYPE",CONFIG.W/2,124,1,PAL["W"],"center");
 
-  if(blinkOn())textPx("Z O J PARA EMPEZAR",CONFIG.W/2,150,1,PAL["J"],"center");
+  const hc=heroImages[game.charIndex];
+  if(hc&&imgReady(hc.run))drawCharImg(hc.run,CONFIG.W/2-70,157,34,false);
+  textPx("< "+hc.name+" >",CONFIG.W/2+14,138,1,PAL["6"],"center");
+  if(blinkOn())textPx("Z O J PARA EMPEZAR",CONFIG.W/2+14,150,1,PAL["J"],"center");
 
   drawPanel(46,164,CONFIG.W-92,44,PAL["D"]);
   cornerBracket(46,164,CONFIG.W-92,44,PAL["F"],5);
