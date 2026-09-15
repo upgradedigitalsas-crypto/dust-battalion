@@ -2,6 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
+<link rel="icon" href="data:,">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Dust Battalion — Run & Gun Prototype</title>
 <style>
@@ -69,25 +70,31 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d", {alpha:false});
 ctx.imageSmoothingEnabled = false;
 
+function loadBg(src,fallback){
+  const i=new Image();
+  i.onerror=()=>{ if(!i.src.endsWith(fallback)) i.src=fallback; };
+  i.src=src; return i;
+}
+// fondos de dia (mas luz); si aun no existen se usan los de atardecer
 const bgImages = {
-  1: Object.assign(new Image(), {src:"assets/bg-desert.jpg"}),
-  2: Object.assign(new Image(), {src:"assets/bg-city.jpg"})
+  1: loadBg("assets/bg-desert-day.jpg","assets/bg-desert.jpg"),
+  2: loadBg("assets/bg-city-day.jpg","assets/bg-city.jpg")
 };
 function loadImg(src,rig){ const i=Object.assign(new Image(),{src}); i.rig=rig; return i; }
 // rig de recorte: linea de cadera, base del torso y pivote (en px del PNG de 300x300)
 const heroImages = [
   {name:"BOINA ROJA",
-   run:loadImg("assets/sprite-hero.png",{legtop:142,torsobot:166,pivx:102,pivy:152,split:102}),
+   run:loadImg("assets/sprite-hero.png",{legtop:142,torsobot:166,pivx:102,pivy:152,split:102,bot:283}),
    idle:loadImg("assets/sprite-hero_idle.png")},
   {name:"GORRA VERDE",
-   run:loadImg("assets/sprite-hero2.png",{legtop:127,torsobot:153,pivx:96,pivy:138,split:96}),
+   run:loadImg("assets/sprite-hero2.png",{legtop:127,torsobot:153,pivx:96,pivy:138,split:96,bot:290}),
    idle:null},
   {name:"BANDANA AZUL",
-   run:loadImg("assets/sprite-hero3.png",{legtop:126,torsobot:153,pivx:99,pivy:138,split:99}),
+   run:loadImg("assets/sprite-hero3.png",{legtop:126,torsobot:153,pivx:99,pivy:138,split:99,bot:291}),
    idle:null}
 ];
-const enemyRifleImg = loadImg("assets/sprite-enemy_rifle.png",{legtop:143,torsobot:167,pivx:110,pivy:154,split:110});
-const enemyRunnerImg = loadImg("assets/sprite-enemy_runner.png",{legtop:157,torsobot:183,pivx:104,pivy:168,split:104});
+const enemyRifleImg = loadImg("assets/sprite-enemy_rifle.png",{legtop:143,torsobot:167,pivx:110,pivy:154,split:110,bot:276});
+const enemyRunnerImg = loadImg("assets/sprite-enemy_runner.png",{legtop:157,torsobot:183,pivx:104,pivy:168,split:104,bot:290});
 const groundImages = {
   1: Object.assign(new Image(), {src:"assets/ground-desert.jpg"}),
   2: Object.assign(new Image(), {src:"assets/ground-city.jpg"})
@@ -106,34 +113,56 @@ function imgReady(img){ return img && img.complete && img.naturalWidth>0; }
 // Rig de recorte estilo Spine: el torso se dibuja entero y las dos piernas se
 // recortan del mismo PNG y rotan en contrafase alrededor de la cadera, lo que
 // produce el ciclo de tijera de una carrera 2D con un solo dibujo de origen.
+// Centro x de cada pierna a la altura de la rodilla, medido una vez sobre el alfa del PNG.
+function rigKnees(img){
+  if(img._knees) return img._knees;
+  const rig=img.rig, sw=img.naturalWidth, sh=img.naturalHeight;
+  const c=document.createElement("canvas"); c.width=sw; c.height=sh;
+  const g=c.getContext("2d"); g.drawImage(img,0,0);
+  const ky=Math.round(rig.pivy+(rig.bot-rig.pivy)*0.5);
+  const row=g.getImageData(0,ky,sw,1).data;
+  const cent=(a,b)=>{let t=0,n=0;for(let x=a;x<b;x++){if(row[x*4+3]>128){t+=x;n++;}}return n?t/n:(a+b)/2;};
+  img._knees=[cent(0,rig.split),cent(rig.split,sw)];
+  return img._knees;
+}
+// Rig de recorte con dos segmentos por pierna (muslo + pantorrilla). La fase es
+// continua, asi que el ciclo contacto->descenso->paso->elevacion no tiene saltos
+// entre frames: la rodilla se dobla solo en la fase de recuperacion (cos>0).
 function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
   const sw=img.naturalWidth, sh=img.naturalHeight;
   const k=h/sh, w=sw*k;
+  const rig=img.rig, animate=moving&&rig&&rig.bot;
   const phase=anim*Math.PI*0.6;
-  const bob=moving?Math.abs(Math.sin(phase))*3:0;
+  const lift=animate?(1-Math.abs(Math.sin(phase)))*2.6:0;
   ctx.save();
   ctx.imageSmoothingEnabled=true;
-  ctx.translate(Math.round(x),Math.round(y-bob));
+  ctx.translate(Math.round(x),Math.round(y-lift));
   if(flip)ctx.scale(-1,1);
   const left=-w/2, topY=-h;
-  const rig=img.rig;
-  if(moving&&rig){
-    const ang=Math.sin(phase)*0.30;
-    const pivX=left+rig.pivx*k, pivY=topY+rig.pivy*k;
-    const legY=topY+rig.legtop*k, legH=(sh-rig.legtop)*k;
-    for(const [sx,swid,a,dark] of [[0,rig.split,-ang,true],[rig.split,sw-rig.split,ang,false]]){
+  if(animate){
+    const [kbx,kfx]=rigKnees(img);
+    const kneeY=rig.pivy+(rig.bot-rig.pivy)*0.5;
+    const toX=v=>left+v*k, toY=v=>topY+v*k;
+    const hipX=toX(rig.pivx), hipY=toY(rig.pivy);
+    const legs=[[0,rig.split,phase+Math.PI,kbx,true],[rig.split,sw-rig.split,phase,kfx,false]];
+    for(const [sx,swid,p,kx,back] of legs){
+      const thigh=-Math.sin(p)*0.26;
+      const knee=Math.max(0,Math.cos(p))*0.7;
+      const kX=toX(kx), kY=toY(kneeY);
       ctx.save();
-      ctx.translate(pivX,pivY); ctx.rotate(a); ctx.translate(-pivX,-pivY);
-      if(dark)ctx.filter="brightness(0.72)";
-      ctx.drawImage(img,sx,rig.legtop,swid,sh-rig.legtop,left+sx*k,legY,swid*k,legH);
-      ctx.filter="none";
+      if(back)ctx.filter="brightness(0.72)";
+      ctx.translate(hipX,hipY); ctx.rotate(thigh); ctx.translate(-hipX,-hipY);
+      ctx.drawImage(img,sx,rig.legtop,swid,kneeY+3-rig.legtop,toX(sx),toY(rig.legtop),swid*k,(kneeY+3-rig.legtop)*k);
+      ctx.translate(kX,kY); ctx.rotate(knee); ctx.translate(-kX,-kY);
+      ctx.drawImage(img,sx,kneeY-4,swid,sh-kneeY+4,toX(sx),kY-4*k,swid*k,(sh-kneeY+4)*k);
       ctx.restore();
     }
-    ctx.drawImage(img,0,0,sw,rig.torsobot,left,topY,w,rig.torsobot*k);
+    // el torso baja 8 px de mas para tapar la cuña que abren los muslos en la entrepierna
+    const tb=Math.min(sh,rig.torsobot+8);
+    ctx.drawImage(img,0,0,sw,tb,left,topY,w,tb*k);
   } else {
     ctx.drawImage(img,left,topY,w,h);
   }
-  ctx.imageSmoothingEnabled=false;
   ctx.restore();
 }
 
@@ -629,11 +658,11 @@ function cornerBracket(x,y,w,h,color=PAL["6"],len=6){
 }
 const vignetteGrad=(()=>{
   const g=ctx.createRadialGradient(CONFIG.W/2,CONFIG.H/2,60,CONFIG.W/2,CONFIG.H/2,230);
-  g.addColorStop(0,"rgba(0,0,0,0)");g.addColorStop(1,"rgba(0,0,0,.4)");
+  g.addColorStop(0,"rgba(0,0,0,0)");g.addColorStop(1,"rgba(0,0,0,.16)");
   return g;
 })();
 function crtOverlay(){
-  ctx.save();ctx.globalAlpha=.08;ctx.fillStyle="#000";
+  ctx.save();ctx.globalAlpha=.035;ctx.fillStyle="#000";
   for(let y=0;y<CONFIG.H;y+=2)ctx.fillRect(0,y,CONFIG.W,1);
   ctx.restore();
   ctx.fillStyle=vignetteGrad;ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
@@ -735,33 +764,27 @@ const sign=v=>v<0?-1:v>0?1:0;
 function aabb(a,b){return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y;}
 function box(e){return {x:e.x+e.hb.x,y:e.y+e.hb.y,w:e.hb.w,h:e.hb.h};}
 function tileSolid(tx,ty){
-  if(tx<0||tx>=MAP_W||ty<0||ty>=MAP_H) return ty>=MAP_H;
-  return LEVEL_MAP[ty][tx]==="#";
+  // terreno continuo: un tile es solido si su centro queda bajo la superficie
+  return ty*16+8>=groundYAt(tx*16+8);
 }
 function collideWorld(e,dt){
+  const wasGround=e.onGround;
   e.onGround=false;
   e.x+=e.vx*dt;
-  let b=box(e);
-  if(e.vx>0){
-    const tx=Math.floor((b.x+b.w-1)/16), y0=Math.floor(b.y/16), y1=Math.floor((b.y+b.h-1)/16);
-    for(let ty=y0;ty<=y1;ty++) if(tileSolid(tx,ty)){e.x=tx*16-e.hb.x-e.hb.w;e.vx=0;break;}
-  }else if(e.vx<0){
-    const tx=Math.floor(b.x/16), y0=Math.floor(b.y/16), y1=Math.floor((b.y+b.h-1)/16);
-    for(let ty=y0;ty<=y1;ty++) if(tileSolid(tx,ty)){e.x=(tx+1)*16-e.hb.x;e.vx=0;break;}
-  }
-  e.y+=e.vy*dt; b=box(e);
-  if(e.vy>0){
-    const ty=Math.floor((b.y+b.h-1)/16), x0=Math.floor(b.x/16), x1=Math.floor((b.x+b.w-1)/16);
-    for(let tx=x0;tx<=x1;tx++) if(tileSolid(tx,ty)){e.y=ty*16-e.hb.y-e.hb.h;e.vy=0;e.onGround=true;break;}
-  }else if(e.vy<0){
-    const ty=Math.floor(b.y/16), x0=Math.floor(b.x/16), x1=Math.floor((b.x+b.w-1)/16);
-    for(let tx=x0;tx<=x1;tx++) if(tileSolid(tx,ty)){e.y=(ty+1)*16-e.hb.y;e.vy=0;break;}
+  e.y+=e.vy*dt;
+  const b=box(e);
+  const feet=b.y+b.h, gy=groundYAt(b.x+b.w/2);
+  // al bajar una pendiente se mantiene pegado al suelo si no esta saltando
+  if(e.vy>=0&&(feet>=gy||(wasGround&&gy-feet<7))){
+    e.y+=gy-feet; e.vy=0; e.onGround=true;
   }
 }
+function smooth01(a,b,x){const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);}
+// Colinas suaves (pendiente maxima ~0.21); planas al inicio y en la arena del jefe.
 function groundYAt(x){
-  const tx=clamp(Math.floor(x/16),0,MAP_W-1);
-  for(let ty=0;ty<MAP_H;ty++) if(tileSolid(tx,ty)) return ty*16;
-  return 192;
+  const hills=Math.sin(x*0.0042)*16+Math.sin(x*0.0093+1.3)*9+Math.sin(x*0.021+0.4)*3;
+  const flat=smooth01(80,260,x)*(1-smooth01(2360,2500,x));
+  return 184-hills*flat;
 }
 function dist2(a,b){const dx=a.x-b.x,dy=a.y-b.y;return dx*dx+dy*dy;}
 
@@ -787,8 +810,7 @@ class Bullet extends Entity{
     if(this.kind==="arc") this.vy+=250*dt;
     this.x+=this.vx*dt;this.y+=this.vy*dt;this.life-=dt;
     if(this.life<=0||this.x<0||this.x>WORLD_W||this.y<-32||this.y>CONFIG.H+80){this.dead=true;return;}
-    const tx=Math.floor(this.x/16),ty=Math.floor(this.y/16);
-    if(tileSolid(tx,ty)){
+    if(this.y>=groundYAt(this.x)){
       if(this.kind==="cannon"||this.kind==="arc") explode(this.x,this.y,34,this.damage,this.team);
       this.dead=true; impactPuff(this.x,this.y); return;
     }
@@ -892,6 +914,17 @@ class MuzzleFlash extends Entity{
   }
 }
 function muzzleFlash(x,y,nx,ny,size){ entities.push(new MuzzleFlash(x,y,nx,ny,size)); }
+class ScorePopup extends Entity{
+  constructor(x,y,text){super(x,y);this.text=text;this.t=0;this.life=1.1;}
+  update(dt){this.t+=dt;this.y-=22*dt;if(this.t>=this.life)this.dead=true;}
+  draw(cam){
+    ctx.save();
+    ctx.globalAlpha=clamp(1-(this.t-0.6)/0.5,0,1);
+    textPx(this.text,this.x-cam.x+1,this.y+1,1,PAL["0"],"center");
+    textPx(this.text,this.x-cam.x,this.y,1,PAL["K"],"center");
+    ctx.restore();
+  }
+}
 class Item extends Entity{
   constructor(x,y,type){super(x,y);this.type=type;this.vy=-65;this.life=10;this.hb={x:-5,y:-5,w:10,h:10};}
   update(dt){
@@ -922,10 +955,14 @@ class Crate extends Entity{
 class Hostage extends Entity{
   constructor(x,y){super(x,y);this.freed=false;this.hb={x:3,y:2,w:22,h:28};}
   free(){
-    if(this.freed)return;this.freed=true;game.hostages++;game.score+=500;SFX.rescue();
+    if(this.freed)return;this.freed=true;game.hostages++;game.score+=500;SFX.rescue();entities.push(new ScorePopup(this.x+14,this.y-6,"+500"));
     const r=Math.random();entities.push(new Item(this.x+14,this.y+2,r<.34?"shotgun":r<.67?"grenade":"score"));
   }
-  update(dt){if(this.freed){this.vx=24;this.vy+=500*dt;collideWorld(this,dt);if(this.x>player.x+220)this.dead=true;}}
+  update(dt){
+    // se libera al tocarlo, como en los arcade (el cuchillo tambien sigue sirviendo)
+    if(!this.freed){ if(player&&aabb(box(player),box(this)))this.free(); return; }
+    this.vx=24;this.vy+=500*dt;collideWorld(this,dt);if(this.x>player.x+220)this.dead=true;
+  }
   draw(cam){
     if(imgReady(objImages.hostage)){ drawCharImg(objImages.hostage,this.x-cam.x+14,this.y+32,38,this.freed,this.anim,this.freed); return; }
     drawSprite(SPRITES.hostage,this.x-cam.x,this.y,2,this.freed);
@@ -1310,10 +1347,10 @@ const SPAWNS = {
 function buildLevel(){
   entities=[];particles=[];mortars=[];ambushSpawnTimer=0;ambushCount=0;
   for(const [x,y,t] of SPAWNS.enemies)entities.push(new Enemy(x,y,t));
-  for(const [x,y] of SPAWNS.turrets)entities.push(new Turret(x,y));
-  for(const [x,y] of SPAWNS.hostages)entities.push(new Hostage(x,y));
-  for(const [x,y,s] of SPAWNS.crates)entities.push(new Crate(x,y,s));
-  entities.push(new Tank(1370,154));
+  for(const [x] of SPAWNS.turrets)entities.push(new Turret(x,groundYAt(x+16)-24));
+  for(const [x] of SPAWNS.hostages)entities.push(new Hostage(x,groundYAt(x+14)-30));
+  for(const [x,,s] of SPAWNS.crates)entities.push(new Crate(x,groundYAt(x+14)-28,s));
+  entities.push(new Tank(1370,groundYAt(1392)-40));
   boss=null;
 }
 
@@ -1441,7 +1478,7 @@ function update(dt){
 
   // Jefe
   if(player.x>CONFIG.WORLD.bossTrigger && !boss){
-    boss=new Boss(2680,126);entities.push(boss);SFX.boss();
+    boss=new Boss(2680,groundYAt(2716)-54);entities.push(boss);SFX.boss();
   }
 
   // Cámara
@@ -1564,51 +1601,6 @@ function drawMidground(){
     for(let x=-30-(cam.x*.18%50);x<CONFIG.W;x+=50){ctx.fillStyle=PAL["D"];ctx.fillRect(Math.floor(x),148,34,4);}
   }
 }
-function drawGroundTex(gimg,tx,ty,x,y,alpha){
-  // 16 px de juego se muestrean desde 48 px de textura: mas detalle por pixel
-  const K=3, tw=gimg.naturalWidth, th=gimg.naturalHeight, S=16*K;
-  const span=Math.max(1,tw-S);
-  let sx=(tx*S)%(span*2);
-  let mirror=false;
-  if(sx>span){ sx=span*2-sx; mirror=true; }   // espejo alterno: oculta la costura
-  const isTop=!tileSolid(tx,ty-1);
-  const sy=isTop?0:Math.min(th-S,S+((ty*7)%3)*S*0.5);
-  ctx.save();
-  ctx.globalAlpha=alpha;
-  ctx.imageSmoothingEnabled=true;
-  if(mirror){ ctx.translate(Math.round(x)+16,y); ctx.scale(-1,1); ctx.drawImage(gimg,sx,sy,S,S,0,0,16,16); }
-  else ctx.drawImage(gimg,sx,sy,S,S,Math.round(x),y,16,16);
-  ctx.restore();
-}
-function drawTile(tx,ty){
-  const x=tx*16-cam.x,y=ty*16;
-  const z=zoneOf(tx*16);
-  if(imgReady(groundImages[1])&&imgReady(groundImages[2])){
-    const t=zoneBlend(tx*16);
-    if(t<1) drawGroundTex(groundImages[1],tx,ty,x,y,1);
-    if(t>0) drawGroundTex(groundImages[2],tx,ty,x,y,t);
-    if(!tileSolid(tx,ty-1)){
-      ctx.fillStyle="rgba(255,226,168,0.20)";ctx.fillRect(Math.round(x),y,16,2);
-      ctx.fillStyle="rgba(0,0,0,0.18)";ctx.fillRect(Math.round(x),y+2,16,1);
-    }
-    return;
-  }
-  if(z===1){
-    ctx.fillStyle=PAL["2"];ctx.fillRect(Math.round(x),y,16,16);
-    ctx.fillStyle=PAL["3"];ctx.fillRect(Math.round(x),y,16,3);
-    ctx.fillStyle=PAL["1"];ctx.fillRect(Math.round(x),y+13,16,3);
-    ctx.fillStyle=PAL["4"];
-    ctx.fillRect(Math.round(x+2+(tx*7+ty*3)%8),y+5,4,2);
-    ctx.fillRect(Math.round(x+9),y+10,3,2);
-  } else {
-    ctx.fillStyle=PAL["L"];ctx.fillRect(Math.round(x),y,16,16);
-    ctx.fillStyle=PAL["M"];ctx.fillRect(Math.round(x),y,16,3);
-    ctx.fillStyle=PAL["C"];ctx.fillRect(Math.round(x),y+13,16,3);
-    ctx.fillStyle=PAL["N"];
-    ctx.fillRect(Math.round(x+2+(tx*7+ty*3)%8),y+5,4,2);
-    ctx.fillRect(Math.round(x+9),y+10,3,2);
-  }
-}
 const SCENERY=[
   [210,"barrel"],[268,"sandbags"],[480,"sandbags"],[700,"barrel"],[760,"barrel"],
   [980,"sandbags"],[1150,"barrel"],[1340,"sandbags"],[1600,"barrel"],[1660,"sandbags"],
@@ -1624,16 +1616,45 @@ function drawScenery(){
     drawCharImg(img,sx,groundYAt(wx),h,(wx%97)<48);
   }
 }
-function drawForeground(){
-  const start=Math.floor(cam.x/16)-1,end=start+Math.ceil(CONFIG.W/16)+3;
-  for(let y=0;y<MAP_H;y++)for(let x=Math.max(0,start);x<Math.min(MAP_W,end);x++)if(tileSolid(x,y))drawTile(x,y);
-  drawScenery();
-  // escombros capa frontal
-  const ox=-((cam.x*.75)%96);
-  for(let i=-1;i<6;i++){
-    const x=Math.floor(ox+i*96),y=190;
-    ctx.fillStyle=PAL["1"];ctx.fillRect(x,y,14,3);ctx.fillStyle=PAL["L"];ctx.fillRect(x+4,y-3,6,3);
+const groundPatterns={};
+function groundPattern(z){
+  const img=groundImages[z];
+  if(!imgReady(img)) return null;
+  if(!groundPatterns[z]) groundPatterns[z]=ctx.createPattern(img,"repeat");
+  const pat=groundPatterns[z];
+  // textura a 1/3 y anclada al mundo, para que el suelo no patine con la camara
+  pat.setTransform(new DOMMatrix().translateSelf(-cam.x,0).scaleSelf(1/3,1/3));
+  return pat;
+}
+function traceSurface(close){
+  const x0=cam.x-8, x1=cam.x+CONFIG.W+8;
+  ctx.beginPath();
+  if(close) ctx.moveTo(x0-cam.x,CONFIG.H+2);
+  for(let wx=x0;wx<=x1;wx+=4){
+    const sy=groundYAt(wx);
+    if(!close&&wx===x0) ctx.moveTo(wx-cam.x,sy); else ctx.lineTo(wx-cam.x,sy);
   }
+  if(close){ ctx.lineTo(x1-cam.x,CONFIG.H+2); ctx.closePath(); }
+}
+function drawGround(){
+  const t=zoneBlend(cam.x+CONFIG.W/2);
+  ctx.save();
+  traceSurface(true);
+  ctx.fillStyle=groundPattern(1)||PAL["3"]; ctx.fill();
+  if(t>0){ ctx.globalAlpha=t; ctx.fillStyle=groundPattern(2)||PAL["L"]; ctx.fill(); ctx.globalAlpha=1; }
+  const depth=ctx.createLinearGradient(0,150,0,CONFIG.H);
+  depth.addColorStop(0,"rgba(60,30,10,0)"); depth.addColorStop(1,"rgba(40,20,8,0.42)");
+  ctx.fillStyle=depth; ctx.fill();
+  ctx.restore();
+  ctx.save();
+  traceSurface(false);
+  ctx.lineWidth=2.5; ctx.strokeStyle="rgba(255,236,190,0.6)"; ctx.stroke();
+  ctx.translate(0,3); ctx.lineWidth=2; ctx.strokeStyle="rgba(70,40,15,0.32)"; ctx.stroke();
+  ctx.restore();
+}
+function drawForeground(){
+  drawGround();
+  drawScenery();
 }
 function render(){
   ctx.save();
