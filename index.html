@@ -90,23 +90,23 @@ function loadImg(src,rig){ const i=Object.assign(new Image(),{src}); i.rig=rig; 
 // rig de recorte: linea de cadera, base del torso y pivote (en px del PNG de 300x300)
 const heroImages = [
   {name:"BOINA ROJA",
-   run:loadImg("assets/sprite-hero.png",{legtop:142,torsobot:166,pivx:102,pivy:152,split:102,bot:283}),
+   run:loadImg("assets/sprite-hero.png",{legtop:142,torsobot:166,pivx:102,pivy:152,split:102,bot:283,arms:[{poly:[[28,52],[100,52],[108,78],[92,112],[84,158],[28,158]],piv:[92,74],amp:0.45,back:true},{poly:[[208,68],[300,36],[300,148],[208,148]],piv:[212,122],amp:0.06}]}),
    idle:loadImg("assets/sprite-hero_idle.png")},
   {name:"GORRA VERDE",
-   run:loadImg("assets/sprite-hero2.png",{legtop:127,torsobot:153,pivx:96,pivy:138,split:96,bot:290}),
+   run:loadImg("assets/sprite-hero2.png",{legtop:127,torsobot:153,pivx:96,pivy:138,split:96,bot:290,arms:[{poly:[[38,38],[112,38],[118,112],[38,118]],piv:[104,60],amp:0.3,back:true,keep:16},{poly:[[200,52],[300,28],[300,128],[200,128]],piv:[206,108],amp:0.06}]}),
    idle:null},
   {name:"BANDANA AZUL",
-   run:loadImg("assets/sprite-hero3.png",{legtop:126,torsobot:153,pivx:99,pivy:138,split:99,bot:291}),
+   run:loadImg("assets/sprite-hero3.png",{legtop:126,torsobot:153,pivx:99,pivy:138,split:99,bot:291,arms:[{poly:[[48,58],[96,58],[104,112],[48,118]],piv:[100,82],amp:0.45,back:true},{poly:[[205,40],[300,28],[300,132],[205,132]],piv:[214,112],amp:0.06}]}),
    idle:null},
   {name:"JUAN JOSÉ", weapon:"boomerang", h:40,
-   run:loadImg("assets/sprite-kid_run.png",{legtop:170,torsobot:197,pivx:136,pivy:182,split:136,bot:293}),
+   run:loadImg("assets/sprite-kid_run.png",{legtop:170,torsobot:197,pivx:136,pivy:182,split:136,bot:293,arms:[{poly:[[52,92],[108,86],[118,118],[104,168],[52,168]],piv:[112,100],amp:0.35,back:true},{poly:[[204,118],[266,118],[266,192],[204,192]],piv:[198,150],amp:0.45}]}),
    idle:loadImg("assets/sprite-kid_idle.png"),
    throwImg:loadImg("assets/sprite-kid_throw.png")}
 ];
 const enemyRifleImg = loadImg("assets/sprite-enemy_rifle.png",{legtop:143,torsobot:167,pivx:110,pivy:154,split:110,bot:276,thigh:0.45,knee:1.05});
 const enemyRobotImg = loadImg("assets/sprite-enemy_robot.png",{legtop:172,torsobot:192,pivx:128,pivy:180,split:128,bot:291,thigh:0.38,knee:0.8});
 const enemyHeavyImg = loadImg("assets/sprite-enemy_heavybot.png",{legtop:170,torsobot:190,pivx:130,pivy:180,split:130,bot:282,thigh:0.26,knee:0.55,foot:0.25,lean:0.03});
-const enemyRunnerImg = loadImg("assets/sprite-enemy_runner.png",{legtop:157,torsobot:183,pivx:104,pivy:168,split:104,bot:290,thigh:0.45,knee:1.05});
+const enemyRunnerImg = loadImg("assets/sprite-enemy_runner.png",{legtop:157,torsobot:183,pivx:104,pivy:168,split:104,bot:290,thigh:0.45,knee:1.05,arms:[{poly:[[20,68],[80,68],[82,172],[20,172]],piv:[78,92],amp:0.5,back:true},{poly:[[222,4],[300,4],[300,168],[196,168],[200,126],[222,112]],piv:[208,142],amp:0.22}]});
 const groundImages = {
   1: Object.assign(new Image(), {src:"assets/ground-desert.jpg"}),
   2: Object.assign(new Image(), {src:"assets/ground-city.jpg"})
@@ -122,7 +122,7 @@ const objImages = {
   explosion:loadImg("assets/sprite-explosion.png"),
   boomerang:loadImg("assets/sprite-boomerang.png"),
   dog:loadImg("assets/sprite-dog_run.png"),
-  hostageFree:loadImg("assets/sprite-hostage_free.png",{legtop:168,torsobot:180,pivx:138,pivy:176,split:138,bot:292,thigh:0.34,knee:0.5,foot:0.3,lean:0}),
+  hostageFree:loadImg("assets/sprite-hostage_free.png",{legtop:168,torsobot:180,pivx:138,pivy:176,split:138,bot:292,thigh:0.34,knee:0.5,foot:0.3,lean:0,arms:[{poly:[[12,0],[110,0],[113,80],[120,100],[96,112],[12,112]],piv:[114,96],amp:0.3,wave:true,back:true},{poly:[[214,0],[292,0],[292,112],[190,112],[194,92],[214,72]],piv:[196,100],amp:0.3,wave:true}]}),
   robot:loadImg("assets/sprite-enemy_robot.png"), heavy:loadImg("assets/sprite-enemy_heavybot.png"),
   drone:loadImg("assets/sprite-enemy_drone.png"), rocket:loadImg("assets/sprite-rocket.png"),
   wLaser:loadImg("assets/sprite-weapon_laser.png"), wRocket:loadImg("assets/sprite-weapon_rocket.png"),
@@ -150,6 +150,22 @@ function rigKnees(img){
 // Rig de recorte con dos segmentos por pierna (muslo + pantorrilla). La fase es
 // continua, asi que el ciclo contacto->descenso->paso->elevacion no tiene saltos
 // entre frames: la rodilla se dobla solo en la fase de recuperacion (cos>0).
+// Brazos recortados del mismo PNG: capa por brazo y un cuerpo sin ellos (el hombro se conserva)
+function armLayers(img){
+  if(img._body)return true;
+  const sw=img.naturalWidth, sh=img.naturalHeight;
+  const body=document.createElement("canvas"); body.width=sw; body.height=sh;
+  const b=body.getContext("2d"); b.drawImage(img,0,0);
+  img._arms=img.rig.arms.map(a=>{
+    const c=document.createElement("canvas"); c.width=sw; c.height=sh; const g=c.getContext("2d");
+    const path=new Path2D(); a.poly.forEach(([px,py],i)=>i?path.lineTo(px,py):path.moveTo(px,py)); path.closePath();
+    g.save(); g.clip(path); g.drawImage(img,0,0); g.restore();
+    b.save(); b.globalCompositeOperation="destination-out"; b.fill(path); b.restore();
+    return {c,a};
+  });
+  for(const {a} of img._arms){ const p=new Path2D(); p.arc(a.piv[0],a.piv[1],a.keep??12,0,Math.PI*2); b.save(); b.clip(p); b.drawImage(img,0,0); b.restore(); }
+  img._body=body; return true;
+}
 function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
   const sw=img.naturalWidth, sh=img.naturalHeight;
   const k=h/sh, w=sw*k;
@@ -169,10 +185,18 @@ function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
     const A=rig.thigh??0.4, K=rig.knee??0.95, F=rig.foot??0.45;
     // cuerpo inclinado hacia delante con un leve vaiven de cadera dos veces por zancada
     ctx.translate(hipX,hipY); ctx.rotate((rig.lean??0.07)+Math.sin(phase*2)*0.022); ctx.translate(-hipX,-hipY);
+    const arms=rig.arms&&armLayers(img)?img._arms:null, src=arms?img._body:img;
+    // brazos en contrafase con la pierna del mismo lado; "wave" = agitar los brazos en alto
+    const drawArm=(L,i)=>{
+      const a=L.a, rot=a.wave?Math.sin(phase*2+i*1.3)*a.amp:(a.back?-1:1)*Math.sin(phase)*a.amp;
+      const X0=toX(a.piv[0]), Y0=toY(a.piv[1]);
+      ctx.save(); ctx.translate(X0,Y0); ctx.rotate(rot); ctx.translate(-X0,-Y0);
+      ctx.drawImage(L.c,left,topY,w,h); ctx.restore();
+    };
     const legs=[[0,rig.split,phase+Math.PI,kbx,abx,true],[rig.split,sw-rig.split,phase,kfx,afx,false]];
     // relleno fijo entre los muslos: evita que se vea el fondo cuando las piernas se abren mucho
     const fillW=18, fx0=rig.pivx-fillW/2;
-    ctx.drawImage(img,fx0,rig.legtop,fillW,kneeY-rig.legtop,toX(fx0),toY(rig.legtop),fillW*k,(kneeY-rig.legtop)*k);
+    ctx.drawImage(src,fx0,rig.legtop,fillW,kneeY-rig.legtop,toX(fx0),toY(rig.legtop),fillW*k,(kneeY-rig.legtop)*k);
     for(const [sx,swid,p,kx,ax,back] of legs){
       const s=Math.sin(p), c=Math.cos(p);
       // muslo: tijera; rodilla: se dobla en el vuelo y amortigua al apoyar el talon
@@ -184,16 +208,18 @@ function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
       ctx.save();
       if(back)ctx.filter="brightness(0.72)";
       ctx.translate(hipX,hipY); ctx.rotate(thigh); ctx.translate(-hipX,-hipY);
-      ctx.drawImage(img,sx,rig.legtop,swid,kneeY+3-rig.legtop,toX(sx),toY(rig.legtop),swid*k,(kneeY+3-rig.legtop)*k);
+      ctx.drawImage(src,sx,rig.legtop,swid,kneeY+7-rig.legtop,toX(sx),toY(rig.legtop),swid*k,(kneeY+7-rig.legtop)*k);
       ctx.translate(kX,kY); ctx.rotate(knee); ctx.translate(-kX,-kY);
-      ctx.drawImage(img,sx,kneeY-4,swid,ankleY+3-(kneeY-4),toX(sx),kY-4*k,swid*k,(ankleY+3-(kneeY-4))*k);
+      ctx.drawImage(src,sx,kneeY-8,swid,ankleY+5-(kneeY-8),toX(sx),kY-8*k,swid*k,(ankleY+5-(kneeY-8))*k);
       ctx.translate(aX,aY); ctx.rotate(foot); ctx.translate(-aX,-aY);
-      ctx.drawImage(img,sx,ankleY-3,swid,sh-ankleY+3,toX(sx),aY-3*k,swid*k,(sh-ankleY+3)*k);
+      ctx.drawImage(src,sx,ankleY-5,swid,sh-ankleY+5,toX(sx),aY-5*k,swid*k,(sh-ankleY+5)*k);
       ctx.restore();
     }
     // el torso baja 8 px de mas para tapar la cuña que abren los muslos en la entrepierna
     const tb=Math.min(sh,rig.torsobot+8);
-    ctx.drawImage(img,0,0,sw,tb,left,topY,w,tb*k);
+    if(arms) arms.forEach((L,i)=>{ if(L.a.back)drawArm(L,i); });
+    ctx.drawImage(src,0,0,sw,tb,left,topY,w,tb*k);
+    if(arms) arms.forEach((L,i)=>{ if(!L.a.back)drawArm(L,i); });
   } else {
     ctx.drawImage(img,left,topY,w,h);
   }
