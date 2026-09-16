@@ -104,8 +104,8 @@ const heroImages = [
    throwImg:loadImg("assets/sprite-kid_throw.png")}
 ];
 const enemyRifleImg = loadImg("assets/sprite-enemy_rifle.png",{legtop:143,torsobot:167,pivx:110,pivy:154,split:110,bot:276,thigh:0.45,knee:1.05});
-const enemyRobotImg = loadImg("assets/sprite-enemy_robot.png",{legtop:172,torsobot:192,pivx:128,pivy:180,split:128,bot:291,thigh:0.3,knee:0.65});
-const enemyHeavyImg = loadImg("assets/sprite-enemy_heavybot.png",{legtop:170,torsobot:190,pivx:130,pivy:180,split:130,bot:282,thigh:0.2,knee:0.45});
+const enemyRobotImg = loadImg("assets/sprite-enemy_robot.png",{legtop:172,torsobot:192,pivx:128,pivy:180,split:128,bot:291,thigh:0.38,knee:0.8});
+const enemyHeavyImg = loadImg("assets/sprite-enemy_heavybot.png",{legtop:170,torsobot:190,pivx:130,pivy:180,split:130,bot:282,thigh:0.26,knee:0.55,foot:0.25,lean:0.03});
 const enemyRunnerImg = loadImg("assets/sprite-enemy_runner.png",{legtop:157,torsobot:183,pivx:104,pivy:168,split:104,bot:290,thigh:0.45,knee:1.05});
 const groundImages = {
   1: Object.assign(new Image(), {src:"assets/ground-desert.jpg"}),
@@ -122,7 +122,7 @@ const objImages = {
   explosion:loadImg("assets/sprite-explosion.png"),
   boomerang:loadImg("assets/sprite-boomerang.png"),
   dog:loadImg("assets/sprite-dog_run.png"),
-  hostageFree:loadImg("assets/sprite-hostage_free.png"),
+  hostageFree:loadImg("assets/sprite-hostage_free.png",{legtop:168,torsobot:180,pivx:138,pivy:176,split:138,bot:292,thigh:0.34,knee:0.5,foot:0.3,lean:0}),
   robot:loadImg("assets/sprite-enemy_robot.png"), heavy:loadImg("assets/sprite-enemy_heavybot.png"),
   drone:loadImg("assets/sprite-enemy_drone.png"), rocket:loadImg("assets/sprite-rocket.png"),
   wLaser:loadImg("assets/sprite-weapon_laser.png"), wRocket:loadImg("assets/sprite-weapon_rocket.png"),
@@ -140,10 +140,11 @@ function rigKnees(img){
   const rig=img.rig, sw=img.naturalWidth, sh=img.naturalHeight;
   const c=document.createElement("canvas"); c.width=sw; c.height=sh;
   const g=c.getContext("2d"); g.drawImage(img,0,0);
-  const ky=Math.round(rig.pivy+(rig.bot-rig.pivy)*0.5);
-  const row=g.getImageData(0,ky,sw,1).data;
-  const cent=(a,b)=>{let t=0,n=0;for(let x=a;x<b;x++){if(row[x*4+3]>128){t+=x;n++;}}return n?t/n:(a+b)/2;};
-  img._knees=[cent(0,rig.split),cent(rig.split,sw)];
+  const at=f=>g.getImageData(0,Math.round(rig.pivy+(rig.bot-rig.pivy)*f),sw,1).data;
+  const cent=(row,a,b,def)=>{let t=0,n=0;for(let x=a;x<b;x++){if(row[x*4+3]>128){t+=x;n++;}}return n?t/n:def;};
+  const kr=at(0.5), ar=at(rig.ankle||0.84);
+  const kb=cent(kr,0,rig.split,rig.split/2), kf=cent(kr,rig.split,sw,(rig.split+sw)/2);
+  img._knees=[kb,kf,cent(ar,0,rig.split,kb),cent(ar,rig.split,sw,kf)];
   return img._knees;
 }
 // Rig de recorte con dos segmentos por pierna (muslo + pantorrilla). La fase es
@@ -161,24 +162,33 @@ function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
   if(flip)ctx.scale(-1,1);
   const left=-w/2, topY=-h;
   if(animate){
-    const [kbx,kfx]=rigKnees(img);
-    const kneeY=rig.pivy+(rig.bot-rig.pivy)*0.5;
+    const [kbx,kfx,abx,afx]=rigKnees(img);
+    const kneeY=rig.pivy+(rig.bot-rig.pivy)*0.5, ankleY=rig.pivy+(rig.bot-rig.pivy)*(rig.ankle||0.84);
     const toX=v=>left+v*k, toY=v=>topY+v*k;
     const hipX=toX(rig.pivx), hipY=toY(rig.pivy);
-    const legs=[[0,rig.split,phase+Math.PI,kbx,true],[rig.split,sw-rig.split,phase,kfx,false]];
+    const A=rig.thigh??0.4, K=rig.knee??0.95, F=rig.foot??0.45;
+    // cuerpo inclinado hacia delante con un leve vaiven de cadera dos veces por zancada
+    ctx.translate(hipX,hipY); ctx.rotate((rig.lean??0.07)+Math.sin(phase*2)*0.022); ctx.translate(-hipX,-hipY);
+    const legs=[[0,rig.split,phase+Math.PI,kbx,abx,true],[rig.split,sw-rig.split,phase,kfx,afx,false]];
     // relleno fijo entre los muslos: evita que se vea el fondo cuando las piernas se abren mucho
     const fillW=18, fx0=rig.pivx-fillW/2;
     ctx.drawImage(img,fx0,rig.legtop,fillW,kneeY-rig.legtop,toX(fx0),toY(rig.legtop),fillW*k,(kneeY-rig.legtop)*k);
-    for(const [sx,swid,p,kx,back] of legs){
-      const thigh=-Math.sin(p)*(rig.thigh||0.26);
-      const knee=Math.max(0,Math.cos(p))*(rig.knee||0.7);
-      const kX=toX(kx), kY=toY(kneeY);
+    for(const [sx,swid,p,kx,ax,back] of legs){
+      const s=Math.sin(p), c=Math.cos(p);
+      // muslo: tijera; rodilla: se dobla en el vuelo y amortigua al apoyar el talon
+      const thigh=-s*A;
+      const knee=Math.max(0,c)*K+(c<0?0.18*K*(-c)*Math.max(0,s):0);
+      // tobillo: punta arriba al apoyar el talon, empuje con la punta al despegar, punta colgando en el vuelo
+      const foot=c<0?(s<0?F*(-s)*(-c)*2:-F*s*(-c)):F*0.35*c;
+      const kX=toX(kx), kY=toY(kneeY), aX=toX(ax), aY=toY(ankleY);
       ctx.save();
       if(back)ctx.filter="brightness(0.72)";
       ctx.translate(hipX,hipY); ctx.rotate(thigh); ctx.translate(-hipX,-hipY);
       ctx.drawImage(img,sx,rig.legtop,swid,kneeY+3-rig.legtop,toX(sx),toY(rig.legtop),swid*k,(kneeY+3-rig.legtop)*k);
       ctx.translate(kX,kY); ctx.rotate(knee); ctx.translate(-kX,-kY);
-      ctx.drawImage(img,sx,kneeY-4,swid,sh-kneeY+4,toX(sx),kY-4*k,swid*k,(sh-kneeY+4)*k);
+      ctx.drawImage(img,sx,kneeY-4,swid,ankleY+3-(kneeY-4),toX(sx),kY-4*k,swid*k,(ankleY+3-(kneeY-4))*k);
+      ctx.translate(aX,aY); ctx.rotate(foot); ctx.translate(-aX,-aY);
+      ctx.drawImage(img,sx,ankleY-3,swid,sh-ankleY+3,toX(sx),aY-3*k,swid*k,(sh-ankleY+3)*k);
       ctx.restore();
     }
     // el torso baja 8 px de mas para tapar la cuña que abren los muslos en la entrepierna
@@ -1281,7 +1291,7 @@ class Hostage extends Entity{
   }
   draw(cam){
     const freeImg=objImages.hostageFree;
-    if(this.freed&&imgReady(freeImg)){ const hop=Math.abs(Math.sin((this.anim||0)*1.6))*4; drawCharImg(freeImg,this.x-cam.x+14,this.y+32-hop,40,(this.fleeDir||1)<0); return; }
+    if(this.freed&&imgReady(freeImg)){ const hop=Math.abs(Math.sin((this.anim||0)*1.6))*4; drawCharImg(freeImg,this.x-cam.x+14,this.y+32-hop,40,(this.fleeDir||1)<0,this.anim||0,this.fleeT>0.35); return; }
     if(imgReady(objImages.hostage)){ drawCharImg(objImages.hostage,this.x-cam.x+14,this.y+32,38,this.freed&&(this.fleeDir||1)<0); return; }
     drawSprite(SPRITES.hostage,this.x-cam.x,this.y,2,this.freed);
   }
@@ -2522,7 +2532,7 @@ function drawCharSelect(){
     drawPanel(bx,boxY,boxW,boxH,accent);
     cornerBracket(bx-(sel?2:0),boxY-(sel?2:0),boxW+(sel?4:0),boxH+(sel?4:0),accent,sel?7:4);
     const hc=heroImages[i];
-    if(hc&&imgReady(hc.run))drawCharImg(hc.run,bx+boxW/2,boxY+116,80,false);
+    if(hc&&imgReady(hc.run))drawCharImg(hc.run,bx+boxW/2,boxY+116,80,false,sel?performance.now()/1000*5.5:0,sel);
     textPx(hc?hc.name:"?",bx+boxW/2,boxY+boxH-13,1,sel?PAL["K"]:PAL["7"],"center");
     if(sel){
       const arrowY=boxY+boxH/2;
