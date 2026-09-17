@@ -79,6 +79,7 @@ const CONFIG = {
   HEAVY:{hp:28, speed:16, gunRate:2.6, rocketRate:4.2},
   QUEEN:{sideHp:22, mouthHp:60, coreHp:50, beamTime:0.55},
   SUPER:{kills:3, time:15},
+  RAGE:{time:25, dmgMul:0.5},
   BURST:{count:8, cd:2.5, tap:0.3},
   CONTINUES:2
 };
@@ -206,6 +207,44 @@ function proceduralBuilding(v){
   else { g.fillStyle="#6b6b70"; g.fillRect(W-26,0,14,8); g.fillStyle="#44444a"; g.fillRect(W-26,7,14,2); g.fillRect(W-24,8,1,3); g.fillRect(W-15,8,1,3); }
   return canvasImage(c);
 }
+function proceduralRageOrb(){
+  const S=40, c=document.createElement("canvas"); c.width=S; c.height=S; const g=c.getContext("2d"), m=S/2;
+  const grd=g.createRadialGradient(m,m,1,m,m,m-2);
+  grd.addColorStop(0,"#fff6f0"); grd.addColorStop(0.35,"#ff5a3a"); grd.addColorStop(0.8,"#c2111a"); grd.addColorStop(1,"rgba(120,0,0,0)");
+  g.fillStyle=grd; g.beginPath(); g.arc(m,m,m-2,0,Math.PI*2); g.fill();
+  g.strokeStyle="#fff"; g.lineWidth=1.4;
+  for(let i=0;i<5;i++){
+    const a=i/5*Math.PI*2; g.beginPath(); g.moveTo(m+Math.cos(a)*5,m+Math.sin(a)*5);
+    for(let s=1;s<4;s++){ const r=5+s*4.5, an=a+(s%2?0.35:-0.35); g.lineTo(m+Math.cos(an)*r,m+Math.sin(an)*r); }
+    g.stroke();
+  }
+  g.strokeStyle="#5a0a0a"; g.lineWidth=1; g.beginPath(); g.arc(m,m,m-2,0,Math.PI*2); g.stroke();
+  return canvasImage(c);
+}
+// fase roja: recolorea el pelo dorado del sprite (tono 38-62) a rojo, manteniendo la piel
+function redVariant(img){
+  if(img._red)return img._red;
+  if(!imgReady(img))return img;
+  const w=img.naturalWidth, h=img.naturalHeight, c=document.createElement("canvas");
+  c.width=w; c.height=h; const g=c.getContext("2d"); g.drawImage(img,0,0);
+  const d=g.getImageData(0,0,w,h), p=d.data, headY=h*0.42;
+  for(let i=0;i<p.length;i+=4){
+    if(p[i+3]<20)continue;
+    const py=Math.floor((i/4)/w);
+    const r=p[i],gr=p[i+1],b=p[i+2], mx=Math.max(r,gr,b), mn=Math.min(r,gr,b), delta=mx-mn;
+    if(!delta||mx<90)continue;
+    const sat=delta/mx;
+    let hue=(mx===r?((gr-b)/delta+6)%6:mx===gr?(b-r)/delta+2:(r-gr)/delta+4)*60;
+    if(hue>=38&&hue<=64&&sat>=0.45){
+      p[i]=Math.min(255,Math.round(r*1.05)); p[i+1]=Math.round(gr*0.26); p[i+2]=Math.round(b*0.3+gr*0.06);
+    } else if(py<headY&&hue>=90&&hue<=250&&sat>=0.3){
+      // ojos: del verde/azul al rojo encendido
+      p[i]=Math.min(255,Math.round(mx*1.0)); p[i+1]=Math.round(mn*0.5); p[i+2]=Math.round(mn*0.45);
+    }
+  }
+  g.putImageData(d,0,0);
+  const out=canvasImage(c); out.rig=img.rig; out.padTop=img.padTop; return img._red=out;
+}
 function proceduralRubble(){
   const R=seededRand(99), W=48, H=22, c=document.createElement("canvas"); c.width=W; c.height=H; const g=c.getContext("2d");
   const cols=["#c9a36b","#a8844f","#e0c08a","#8a6a40","#b8966a"];
@@ -242,6 +281,7 @@ const objImages = {
   larva:loadImg("assets/sprite-larva.png"), egg:loadImg("assets/sprite-egg.png"),
   wMinigun:loadImg("assets/sprite-weapon_minigun.png"), wFlame:loadImg("assets/sprite-weapon_flamer.png"),
   wPlasma:loadImg("assets/sprite-weapon_plasma.png"), chute:loadImg("assets/sprite-supply_drop.png"),
+  rage:proceduralRageOrb(),
   bldg1:proceduralBuilding(0), bldg2:proceduralBuilding(1), rubble:proceduralRubble()
 };
 function imgReady(img){ return img && img.complete && img.naturalWidth>0; }
@@ -1191,8 +1231,8 @@ class ScorePopup extends Entity{
 class Boomerang extends Entity{
   // sale disparado, frena, y vuelve a la mano del lanzador atravesando enemigos
   constructor(owner,x,y,nx,ny,big=false,power=0){
-    super(x,y); this.owner=owner; this.mode=big==="super"?"super":big?"giant":null; this.big=!!big; this.hb=big?{x:-13,y:-9,w:26,h:18}:{x:-7,y:-5,w:14,h:10};
-    this.power=power; const spd=(this.mode==="super"?1.3:1)*(1+0.45*power); this.vx=nx*250*spd; this.vy=ny*225*spd; this.t=0; this.spin=0; this.returning=false;
+    super(x,y); this.owner=owner; this.mode=big==="rage"?"rage":big==="super"?"super":big?"giant":null; this.big=!!big; this.hb=big?{x:-13,y:-9,w:26,h:18}:{x:-7,y:-5,w:14,h:10};
+    this.power=power; const spd=(this.mode==="rage"?1.5:this.mode==="super"?1.3:1)*(1+0.45*power); this.vx=nx*250*spd; this.vy=ny*225*spd; this.t=0; this.spin=0; this.returning=false;
     this.hitSet=new Set(); this.trail=[];
   }
   update(dt){
@@ -1212,23 +1252,23 @@ class Boomerang extends Entity{
     for(const e of entities){
       if(e.dead||this.hitSet.has(e)||!aabb(b,box(e)))continue;
       if(isHostile(e)){
-        this.hitSet.add(e); e.hurt((this.mode==="super"?6:this.big?4:2)+(this.power>=1?2:0),"shot",sign(this.vx)||1); impactPuff(this.x,this.y);
+        this.hitSet.add(e); e.hurt((this.mode==="rage"?10:this.mode==="super"?6:this.big?4:2)+(this.power>=1?2:0),"shot",sign(this.vx)||1); impactPuff(this.x,this.y);
       } else if(e instanceof Crate){ this.hitSet.add(e); e.hurt(2); }
       else if(e instanceof Hostage&&!e.freed){ e.free(); }
     }
-    if(Math.random()<0.5) addLight(this.x,this.y,this.mode==="super"?30:18,this.mode==="super"?"255,70,40":"120,220,255",0.05);
+    if(Math.random()<0.5) addLight(this.x,this.y,this.mode?34:18,this.mode==="rage"?"255,40,30":this.mode==="super"?"255,70,40":"120,220,255",0.05);
   }
   draw(cam){
     ctx.save(); ctx.globalCompositeOperation="lighter";
     for(let i=0;i<this.trail.length;i++){
       const [tx,ty]=this.trail[i];
-      ctx.fillStyle=`rgba(${this.mode==="super"?"255,60,40":this.big?"255,210,90":"120,220,255"},${((i+1)/this.trail.length*0.35).toFixed(3)})`;
+      ctx.fillStyle=`rgba(${this.mode==="rage"?"255,40,30":this.mode==="super"?"255,60,40":this.big?"255,210,90":"120,220,255"},${((i+1)/this.trail.length*0.35).toFixed(3)})`;
       ctx.beginPath(); ctx.arc(tx-cam.x,ty,(3+i*0.4)*(this.big?1.8:1),0,Math.PI*2); ctx.fill();
     }
     ctx.restore();
     const img=objImages.boomerang;
     ctx.save(); ctx.translate(this.x-cam.x,this.y); ctx.rotate(this.spin);
-    if(imgReady(img)){ ctx.imageSmoothingEnabled=true; const bs=this.mode==="super"?32:this.big?36:20; if(this.mode==="super")ctx.filter="hue-rotate(165deg) saturate(6) brightness(0.9) contrast(1.2)"; else if(this.big)ctx.filter="sepia(1) saturate(3) brightness(1.3)"; ctx.drawImage(img,-bs/2,-bs/2,bs,bs); }
+    if(imgReady(img)){ ctx.imageSmoothingEnabled=true; const bs=this.mode==="rage"?38:this.mode==="super"?32:this.big?36:20; if(this.mode==="rage")ctx.filter="hue-rotate(160deg) saturate(9) brightness(1.15) contrast(1.35)"; else if(this.mode==="super")ctx.filter="hue-rotate(165deg) saturate(6) brightness(0.9) contrast(1.2)"; else if(this.big)ctx.filter="sepia(1) saturate(3) brightness(1.3)"; ctx.drawImage(img,-bs/2,-bs/2,bs,bs); }
     else {
       ctx.globalCompositeOperation="lighter"; ctx.lineCap="round";
       ctx.strokeStyle="rgba(140,230,255,1)"; ctx.lineWidth=3;
@@ -1446,7 +1486,7 @@ class EnemyTank extends Entity{
   }
 }
 // icono, ancho en pantalla, alto/ancho, color del halo
-const ITEM_ICONS={laser:["wLaser",22,1,"80,210,255"],rocket:["wRocket",22,1,"255,170,60"],shieldup:["pShield",13,1,"90,220,255"],rapid:["pRapid",11,1,"255,150,50"],life:["pLife",13,1,"90,255,120"]};
+const ITEM_ICONS={rage:["rage",17,1,"255,70,50"],laser:["wLaser",22,1,"80,210,255"],rocket:["wRocket",22,1,"255,170,60"],shieldup:["pShield",13,1,"90,220,255"],rapid:["pRapid",11,1,"255,150,50"],life:["pLife",13,1,"90,255,120"]};
 const POWERS=[{kind:"minigun",name:"MINIGUN",ammo:220},{kind:"flame",name:"LANZALLAMAS",ammo:160},{kind:"plasma",name:"CANON DE PLASMA",ammo:24},{kind:"giant",name:"BOOMERANG GIGANTE",time:25}];
 const POWER_ICONS=[["wMinigun",24,1,"255,200,80"],["wFlame",24,1,"255,120,40"],["wPlasma",24,1,"170,120,255"],["boomerang",18,1,"255,220,90"]];
 class Item extends Entity{
@@ -1825,6 +1865,7 @@ function buildLair(){
   cam.x=0; game.checkpoint=40;
   boss=new SandQueen(); entities.push(boss);
   if(heroImages[player.charIndex].weapon==="boomerang")entities.push(new Buddy(player));
+  entities.push(Object.assign(new Item(96,LAIR.ground-10,"rage"),{life:1e9}));
   saveGame(false);
 }
 function drawLairBg(){
@@ -2465,12 +2506,12 @@ class Player extends Entity{
     super(x,y);this.hb={x:6,y:2,w:16,h:29};this.lives=CONFIG.PLAYER.lives;this.grenades=CONFIG.PLAYER.grenadeCount;
     this.special=0;this.rifleAmmo=0;this.fireCd=0;this.knifeCd=0;this.knifeT=0;this.invuln=1;this.facing=1;this.inTank=null;this.crouch=false;
     this.lastStep=-1;this.charIndex=game.charIndex||0;this.throwT=0;this.shield=100;this.shieldOn=false;this.shieldFlash=0;this.hp=CONFIG.PLAYER.maxHp;this.hurtT=0;
-    this.laserAmmo=0;this.rocketAmmo=0;this.rapidT=0;this.shieldBoost=0;this.power=null;this.kills=0;this.superT=0;this.burstCd=0;this.lastTap=-9;
+    this.laserAmmo=0;this.rocketAmmo=0;this.rapidT=0;this.shieldBoost=0;this.power=null;this.kills=0;this.superT=0;this.rageT=0;this.burstCd=0;this.lastTap=-9;
   }
   // cada impacto quita un porcentaje de la barra de vida; al vaciarse se pierde una vida
   die(dmg=CONFIG.PLAYER.hitDmg){
     if(this.invuln>0||game.state!=="PLAY"||this.inTank)return;
-    this.hp=(this.hp??CONFIG.PLAYER.maxHp)-dmg; this.hurtT=0.25;
+    this.hp=(this.hp??CONFIG.PLAYER.maxHp)-dmg*(this.rageT>0?CONFIG.RAGE.dmgMul:1); this.hurtT=0.25;
     for(let i=0;i<6;i++)particles.push(new Particle(this.x+14,this.y+12,rnd(-70,70),rnd(-110,-20),rnd(.3,.6),"blood"));
     if(this.hp>0){ this.invuln=CONFIG.PLAYER.hitInvuln; tone(170,0.14,"sawtooth",0.16,-90); noise(0.06,0.08); shake(2,.1); return; }
     this.loseLife();
@@ -2480,7 +2521,7 @@ class Player extends Entity{
     this.hp=CONFIG.PLAYER.maxHp;
     this.lives--;SFX.death();gatlingStop();shake(6,.25);
     for(let i=0;i<8;i++)particles.push(new Particle(this.x+14,this.y+12,rnd(-90,90),rnd(-150,-45),rnd(.35,.8)));
-    this.special=0;this.rifleAmmo=0;this.laserAmmo=0;this.rocketAmmo=0;this.power=null;this.superT=0;this.kills=0;this.grenades=CONFIG.PLAYER.grenadeCount;this.shield=100;this.shieldOn=false;
+    this.special=0;this.rifleAmmo=0;this.laserAmmo=0;this.rocketAmmo=0;this.power=null;this.superT=0;this.rageT=0;this.kills=0;this.grenades=CONFIG.PLAYER.grenadeCount;this.shield=100;this.shieldOn=false;
     if(this.lives<=0){game.state="GAMEOVER";finishRun(false);return;}
     this.x=game.quake&&!game.quake.done?game.quake.camX+40:Math.max(game.checkpoint,48);this.y=80;this.vx=0;this.vy=0;this.invuln=CONFIG.PLAYER.invulnRespawn;
   }
@@ -2503,16 +2544,21 @@ class Player extends Entity{
       // doble toque de S: rafaga de boomerangs en 360 grados
       if(game.runTime-this.lastTap<CONFIG.BURST.tap&&this.burstCd<=0){
         this.burstCd=CONFIG.BURST.cd; this.lastTap=-9; this.throwT=0.3; this.fireCd=0.3; this.skipRelease=true;
-        const mode=this.superT>0?"super":this.power?.kind==="giant"?"giant":false, n=CONFIG.BURST.count;
+        const mode=this.rageT>0?"rage":this.superT>0?"super":this.power?.kind==="giant"?"giant":false, n=CONFIG.BURST.count+(this.rageT>0?4:0);
         for(let i=0;i<n;i++){ const a=i/n*Math.PI*2-Math.PI/2; entities.push(new Boomerang(this,this.x+14,this.y+12,Math.cos(a),Math.sin(a),mode)); }
         SFX.boomerang(); SFX.charge(); flashScreen(.25); shake(2,.12);
         addLight(this.x+14,this.y+12,70,mode==="super"?"255,80,50":"120,220,255",.25);
         entities.push(new ScorePopup(this.x+14,this.y-16,"RAFAGA 360"));
       } else this.lastTap=game.runTime;
     }
+    if(this.rageT>0){
+      this.rageT=Math.max(0,this.rageT-dt);
+      if(heroImages[this.charIndex].weapon==="boomerang")this.superT=Math.max(this.superT,this.rageT);
+      if(Math.random()<dt*14)addLight(this.x+14,this.y+12,38,"255,70,50",.09);
+    }
     if(this.superT>0){ this.superT=Math.max(0,this.superT-dt); if(Math.random()<dt*10)addLight(this.x+14,this.y+12,34,"255,210,90",.08); }
     if(this.power&&this.power.time!==undefined){ this.power.time-=dt; if(this.power.time<=0)this.power=null; }
-    this.hurtT-=dt; this.shieldFlash-=dt; this.shieldBoost-=dt; this.rapidT-=dt; if(this.rapidT>0)this.fireCd-=dt;
+    this.hurtT-=dt; this.shieldFlash-=dt; this.shieldBoost-=dt; this.rapidT-=dt; if(this.rapidT>0||this.rageT>0)this.fireCd-=dt;
     const target=move*CONFIG.PLAYER.run, acc=this.onGround?CONFIG.PLAYER.accel:CONFIG.PLAYER.airAccel;
     if(move&&!this.shieldOn) this.vx += clamp(target-this.vx,-acc*dt,acc*dt);
     else if(this.onGround) this.vx += clamp(-this.vx,-CONFIG.PLAYER.friction*dt,CONFIG.PLAYER.friction*dt);
@@ -2639,9 +2685,9 @@ class Player extends Entity{
     return [cx+f*dx,foot+dy];
   }
   throwBoomerang(aim,power){
-    const limit=this.rapidT>0||this.superT>0||this.power?.kind==="giant"?3:2;
+    const limit=this.rageT>0?4:this.rapidT>0||this.superT>0||this.power?.kind==="giant"?3:2;
     if(entities.filter(e=>e instanceof Boomerang&&!e.dead).length>=limit)return;
-    const mode=this.superT>0?"super":this.power?.kind==="giant"?"giant":false;
+    const mode=this.rageT>0?"rage":this.superT>0?"super":this.power?.kind==="giant"?"giant":false;
     this.fireCd=this.superT>0?0.18:0.28; this.throwT=0.22; SFX.boomerang();
     entities.push(new Boomerang(this,this.x+14+aim.x*14,this.y+12+aim.y*8,aim.x,aim.y,mode,power));
     addLight(this.x+14+aim.x*16,this.y+12,22+power*30,mode==="super"?"255,80,50":"120,220,255",0.08+power*0.1);
@@ -2652,10 +2698,11 @@ class Player extends Entity{
     if(this.invuln>0&&Math.floor(this.invuln*14)%2===0)return;
     const hc=heroImages[this.charIndex];
     const moving=Math.abs(this.vx)>8;
-    const sup=this.superT>0&&hc.superRun&&imgReady(hc.superRun), pick=(a,b)=>sup&&a&&imgReady(a)?a:b;
+    const sup=this.superT>0&&hc.superRun&&imgReady(hc.superRun), red=this.rageT>0&&hc.transform;
+    const pick=(a,b)=>{ const im=sup&&a&&imgReady(a)?a:b; if(!red||!im||!imgReady(im))return im; const rv=redVariant(im); return imgReady(rv)?rv:im; };
     const aiming=!!(hc.muzzle&&this.aimVec&&this.aimVec.y!==0&&!this.crouch);
     const charImg=!this.crouch&&hc&&(this.throwT>0&&hc.throwImg?pick(hc.superThrow,hc.throwImg):(moving||aiming?pick(hc.superRun,hc.run):pick(hc.superIdle,hc.idle||hc.run)));
-    if(this.superT>0)drawSuperAura(this,cam,false);
+    if(this.superT>0||this.rageT>0)drawSuperAura(this,cam,false);
     if(charImg&&imgReady(charImg)){
       if(this.hurtT>0)ctx.filter="sepia(1) saturate(6) hue-rotate(-45deg) brightness(0.9)";
       drawCharImg(charImg,this.x-cam.x+14,this.y+32,hc.h||44,this.facing<0,this.anim,moving,aiming?aimRotOf(this.aimVec):0);
@@ -2669,7 +2716,13 @@ class Player extends Entity{
       }
       drawSprite(sp,this.x-cam.x,this.y,2,this.facing<0);
     }
-    if(this.superT>0)drawSuperAura(this,cam,true);
+    if(this.superT>0||this.rageT>0)drawSuperAura(this,cam,true);
+    if(this.rageT>0&&hc.transform&&!this.crouch){
+      // ojos rojos encendidos en la fase roja
+      const ex=this.x-cam.x+14+this.facing*3, ey=this.y+32-(hc.h||44)+8;
+      ctx.save(); ctx.globalCompositeOperation="lighter"; ctx.fillStyle=`rgba(255,60,40,${(0.5+0.3*Math.sin(performance.now()/90)).toFixed(2)})`;
+      ctx.beginPath(); ctx.arc(ex,ey,2.6,0,Math.PI*2); ctx.fill(); ctx.restore();
+    }
     if(this.shieldOn||this.shieldFlash>0){
       const fx=this.x-cam.x+14+this.facing*14, fy=this.y+16, pulse=0.75+Math.sin(performance.now()/60)*0.25;
       const a=(this.shieldFlash>0?0.95:0.55)*pulse;
@@ -2731,18 +2784,19 @@ function onKill(){
   }
 }
 function hash01(n){ const s=Math.sin(n*127.1)*43758.5453; return s-Math.floor(s); }
-function drawSuperAura(p,cam,front){ drawAuraAt(p.x-cam.x+14,p.y+14,1,front); }
+function drawSuperAura(p,cam,front){ drawAuraAt(p.x-cam.x+14,p.y+14,1,front,p.rageT>0); }
 // aura dorada (detras) o rayos (delante) centrados en cx,cy; sc escala el efecto
-function drawAuraAt(cx,cy,sc,front){
+function drawAuraAt(cx,cy,sc,front,red){
   const t=performance.now()/1000;
   ctx.save(); ctx.globalCompositeOperation="lighter";
   if(!front){
     const pulse=0.6+0.4*Math.sin(t*14), g=ctx.createRadialGradient(cx,cy,2*sc,cx,cy,26*sc);
-    g.addColorStop(0,`rgba(255,230,120,${(0.38*pulse).toFixed(3)})`); g.addColorStop(0.6,`rgba(255,200,60,${(0.2*pulse).toFixed(3)})`); g.addColorStop(1,"rgba(255,180,40,0)");
+    if(red){ g.addColorStop(0,`rgba(255,120,90,${(0.45*pulse).toFixed(3)})`); g.addColorStop(0.6,`rgba(230,30,25,${(0.26*pulse).toFixed(3)})`); g.addColorStop(1,"rgba(180,10,10,0)"); }
+    else { g.addColorStop(0,`rgba(255,230,120,${(0.38*pulse).toFixed(3)})`); g.addColorStop(0.6,`rgba(255,200,60,${(0.2*pulse).toFixed(3)})`); g.addColorStop(1,"rgba(255,180,40,0)"); }
     ctx.fillStyle=g; ctx.beginPath(); ctx.ellipse(cx,cy-2*sc,17*sc,26*sc,0,0,Math.PI*2); ctx.fill();
     for(let i=0;i<6;i++){
       const ph=(t*1.8+i/6)%1, fx=cx+Math.sin(i*2.3+t*3)*10*sc, fy=cy+(16-ph*38)*sc;
-      ctx.fillStyle=`rgba(255,225,110,${(0.55*(1-ph)).toFixed(3)})`;
+      ctx.fillStyle=`rgba(${red?"255,90,60":"255,225,110"},${(0.55*(1-ph)).toFixed(3)})`;
       ctx.beginPath(); ctx.moveTo(fx-2*sc,fy+5*sc); ctx.lineTo(fx,fy-6*sc); ctx.lineTo(fx+2*sc,fy+5*sc); ctx.fill();
     }
   } else {
@@ -2754,7 +2808,7 @@ function drawAuraAt(cx,cy,sc,front){
       let x=cx+Math.cos(a0)*12*sc, y=cy+Math.sin(a0)*18*sc;
       ctx.beginPath(); ctx.moveTo(x,y);
       for(let s=0;s<5;s++){ x+=(hash01(seed*13+b*5+s)-0.5)*11*sc; y+=(hash01(seed*17+b*3+s)-0.5)*11*sc; ctx.lineTo(x,y); }
-      ctx.strokeStyle="rgba(150,225,255,0.5)"; ctx.lineWidth=2.6*lw; ctx.stroke();
+      ctx.strokeStyle=red?"rgba(255,70,50,0.65)":"rgba(150,225,255,0.5)"; ctx.lineWidth=2.6*lw; ctx.stroke();
       ctx.strokeStyle="rgba(255,255,255,0.95)"; ctx.lineWidth=0.9*lw; ctx.stroke();
     }
   }
@@ -2845,7 +2899,14 @@ function casing(x,y,dir=1){particles.push(new Particle(x,y,-dir*rnd(18,34),rnd(-
 function pickupItem(i){
   const p=player, kid=heroImages[p.charIndex].weapon==="boomerang", t=i.type;
   let label=null;
-  if(t==="power"){ const d=POWERS[p.charIndex]; p.power={...d}; p.special=p.rifleAmmo=p.laserAmmo=p.rocketAmmo=0; label="ARMA ESPECIAL "+d.name; SFX.powerup(); flashScreen(.3); addLight(i.x,i.y,60,POWER_ICONS[p.charIndex][3],.3); }
+  if(t==="rage"){
+    p.rageT=CONFIG.RAGE.time;
+    if(heroImages[p.charIndex].weapon==="boomerang"){ p.superT=Math.max(p.superT,CONFIG.RAGE.time); label="FASE ROJA"; }
+    else label="FURIA ROJA";
+    SFX.powerup(); SFX.charge(); flashScreen(.5); shake(4,.3); addLight(i.x,i.y,90,"255,60,40",.5);
+    for(let k=0;k<18;k++)particles.push(new Particle(i.x,i.y,rnd(-130,130),rnd(-170,-20),rnd(.3,.8)));
+  }
+  else if(t==="power"){ const d=POWERS[p.charIndex]; p.power={...d}; p.special=p.rifleAmmo=p.laserAmmo=p.rocketAmmo=0; label="ARMA ESPECIAL "+d.name; SFX.powerup(); flashScreen(.3); addLight(i.x,i.y,60,POWER_ICONS[p.charIndex][3],.3); }
   else if(["shotgun","rifle","laser","rocket"].includes(t)&&kid){ p.rapidT=Math.max(p.rapidT,10); label="BOOMERANG TURBO"; }
   else if(t==="shotgun"){p.special=CONFIG.SHOTGUN.ammo;p.laserAmmo=p.rocketAmmo=0;label="ESCOPETA";}
   else if(t==="rifle"){p.rifleAmmo=CONFIG.RIFLE.ammo;p.special=p.laserAmmo=p.rocketAmmo=0;label="RIFLE";}
@@ -2883,6 +2944,9 @@ function buildLevel(){
   for(const [x,,s] of SPAWNS.crates)entities.push(new Crate(x,groundYAt(x+14)-28,s));
   entities.push(new Tank(1370,groundYAt(1392)-40));
   for(const x of SPAWNS.tanks)entities.push(new EnemyTank(x));
+  // poder de fase roja antes del terremoto y antes del jefe
+  for(const rx of [QUAKE.x-120,CONFIG.WORLD.bossTrigger-140])
+    entities.push(Object.assign(new Item(rx,groundYAt(rx)-10,"rage"),{life:1e9}));
   for(const x of SPAWNS.robots)entities.push(new Robot(x,groundYAt(x+14)-31));
   for(const x of SPAWNS.drones)entities.push(new Drone(x,groundYAt(x)-78));
   for(const x of SPAWNS.heavies)entities.push(new HeavyBot(x));
@@ -3653,10 +3717,13 @@ function drawHUD(){
 
   if(heroImages[player.charIndex].weapon==="boomerang"){
     const x=6, y=barH+4;
-    if(player.superT>0) textPx("MODO PODER "+Math.ceil(player.superT),x,y,1,blinkOn()?PAL["K"]:PAL["J"]);
+    if(player.rageT>0) textPx("FASE ROJA "+Math.ceil(player.rageT),x,y,1,blinkOn()?"#ff6a4a":PAL["K"]);
+    else if(player.superT>0) textPx("MODO PODER "+Math.ceil(player.superT),x,y,1,blinkOn()?PAL["K"]:PAL["J"]);
     else { textPx("PODER",x,y,1,PAL["7"]); for(let i=0;i<CONFIG.SUPER.kills;i++){ ctx.fillStyle=i<(player.kills||0)?PAL["K"]:PAL["1"]; ctx.fillRect(x+24+i*6,y,4,5); } }
     textPx(player.burstCd>0?"360 ...":"SS 360",x,y+8,1,player.burstCd>0?PAL["M"]:PAL["W"]);
   }
+  if(player.rageT>0&&heroImages[player.charIndex].weapon!=="boomerang")
+    textPx("FURIA ROJA "+Math.ceil(player.rageT),6,barH+4,1,blinkOn()?"#ff6a4a":PAL["K"]);
   if(player.inTank){
     drawPanel(4,barH+3,96,13,PAL["B"]);
     textPx("BLINDADO "+player.inTank.armor,8,barH+6,1,PAL["F"]);
@@ -3710,6 +3777,7 @@ function drawTitle(){
   const tips=[
     "TOCA A LOS REHENES PARA LIBERARLOS",
     "MANTEN S Y USA LAS FLECHAS PARA APUNTAR",
+    "EL ORBE ROJO DA MAS FUERZA Y RESISTENCIA",
     "CAJAS Y REHENES SUELTAN ARMAS Y POWER UPS",
     "CAMINA HASTA EL TANQUE PARA SUBIRTE",
     "JUAN JOSE LANZA SU BOOMERANG CON S",
