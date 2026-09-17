@@ -823,7 +823,7 @@ function noise(dur=0.08,vol=0.2){
   s.connect(g); g.connect(master); s.start();
 }
 const sfxClips={};
-for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm","yell","boomerang","cannon","bark","bark2","laser","rocket","powerup","stomp","drone","mechdie","roar","acid","splat","charge","beam","screech","quake","gunshot","loading","droneshot"]){
+for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm","yell","boomerang","cannon","bark","bark2","laser","rocket","powerup","stomp","drone","mechdie","roar","acid","splat","charge","beam","screech","quake","gunshot","loading","droneshot","grenadepin","grenadebounce"]){
   const a=new Audio("assets/sfx/"+n+".mp3"); a.preload="auto"; sfxClips[n]=a;
 }
 function playClip(name,vol){
@@ -845,6 +845,8 @@ function gatlingStop(){ loopClip("gatling",false); }
 const SFX={
   gunshot(){playClip("gunshot",0.5);},
   droneShot(){playClip("droneshot",0.5);},
+  grenadePin(){playClip("grenadepin",0.7);},
+  grenadeBounce(){playClip("grenadebounce",0.65);},
   shot(){playClip("shot",0.5);},
   shotgun(){playClip("shotgun",0.6);},
   jump(){playClip("jump",0.45);},
@@ -1005,7 +1007,7 @@ class Grenade extends Entity{
   update(dt){
     this.vy+=420*dt; this.x+=this.vx*dt; this.y+=this.vy*dt; this.fuse-=dt;
     const gy=groundYAt(this.x);
-    if(this.y>gy-4){this.y=gy-4;this.vy*=-0.36;this.vx*=0.75;}
+    if(this.y>gy-4){ if(!this.bounced&&this.vy>40){this.bounced=true;SFX.grenadeBounce();} this.y=gy-4;this.vy*=-0.36;this.vx*=0.75;}
     if(this.fuse<=0){explode(this.x,this.y,CONFIG.GRENADE.radius,CONFIG.GRENADE.damage,"player");this.dead=true;}
   }
   draw(cam){drawSprite(SPRITES.grenade,this.x-cam.x-4,this.y-4,2);}
@@ -2391,7 +2393,7 @@ class Player extends Entity{
         casing(this.x+13,this.y+9,this.facing);
       }
     }
-    if((hit("c","l")||gp?.nade)&&this.grenades>0&&heroImages[this.charIndex].weapon!=="boomerang"&&!this.shieldOn){this.grenades--;entities.push(new Grenade(this.x+14,this.y+10,this.facing));}
+    if((hit("c","l")||gp?.nade)&&this.grenades>0&&heroImages[this.charIndex].weapon!=="boomerang"&&!this.shieldOn){this.grenades--;SFX.grenadePin();entities.push(new Grenade(this.x+14,this.y+10,this.facing));}
     if((hit("shift")||gp?.knife)&&this.knifeCd<=0&&!this.shieldOn){
       this.knifeCd=CONFIG.PLAYER.knifeCooldown;this.knifeT=CONFIG.PLAYER.knifeTime;SFX.knife();melee(this);
     }
