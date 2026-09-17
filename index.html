@@ -133,7 +133,9 @@ const objImages = {
   palm:loadImg("assets/sprite-palm.png"), grass:loadImg("assets/sprite-grass.png"), tumbleweed:loadImg("assets/sprite-tumbleweed.png"),
   qHead:loadImg("assets/sprite-queen_head.png"), qBody:loadImg("assets/sprite-queen_body.png"), qSide:loadImg("assets/sprite-queen_side.png"),
   qSeg:loadImg("assets/sprite-queen_segment.png"), qCore:loadImg("assets/sprite-queen_core.png"),
-  larva:loadImg("assets/sprite-larva.png"), egg:loadImg("assets/sprite-egg.png")
+  larva:loadImg("assets/sprite-larva.png"), egg:loadImg("assets/sprite-egg.png"),
+  wMinigun:loadImg("assets/sprite-weapon_minigun.png"), wFlame:loadImg("assets/sprite-weapon_flamer.png"),
+  wPlasma:loadImg("assets/sprite-weapon_plasma.png"), chute:loadImg("assets/sprite-supply_drop.png")
 };
 function imgReady(img){ return img && img.complete && img.naturalWidth>0; }
 // Rig de recorte estilo Spine: el torso se dibuja entero y las dos piernas se
@@ -895,20 +897,38 @@ class Entity{
 class Bullet extends Entity{
   constructor(x,y,vx,vy,team="player",damage=1,kind="bullet"){
     super(x,y);this.vx=vx;this.vy=vy;this.team=team;this.damage=damage;this.kind=kind;
-    this.life=kind==="cannon"?1.8:1.35; this.hb={x:-2,y:-2,w:4,h:4}; this.hitSet=kind==="laser"?new Set():null;
+    this.life=kind==="cannon"?1.8:kind==="flame"?rnd(.3,.42):1.35; this.max0=this.life; this.hb={x:-2,y:-2,w:4,h:4};
+    this.pierce=kind==="laser"||kind==="flame"||kind==="plasma"; this.hitSet=this.pierce?new Set():null;
   }
   update(dt){
     if(this.kind==="arc"||this.kind==="acid") this.vy+=250*dt;
+    if(this.kind==="flame"){ this.vx*=Math.pow(0.15,dt); this.vy-=50*dt; }
     this.x+=this.vx*dt;this.y+=this.vy*dt;this.life-=dt;
     if(this.life<=0||this.x<0||this.x>WORLD_W||this.y<-32||this.y>CONFIG.H+80){this.dead=true;return;}
     if(this.y>=groundYAt(this.x)){
       if(this.kind==="cannon"||this.kind==="arc") explode(this.x,this.y,34,this.damage,this.team);
       else if(this.kind==="acid"){ acidSplash(this.x,this.y,8); SFX.splat(); }
+      else if(this.kind==="plasma") explode(this.x,this.y,22,2,"player");
       this.dead=true; impactPuff(this.x,this.y); return;
     }
     handleBulletHit(this);
   }
   draw(cam){
+    if(this.kind==="flame"||this.kind==="plasma"){
+      const x=this.x-cam.x, age=1-this.life/this.max0;
+      ctx.save(); ctx.globalCompositeOperation="lighter";
+      if(this.kind==="flame"){
+        const r=2+age*7;
+        ctx.fillStyle=`rgba(255,${Math.round(200-age*150)},40,${(0.75*(1-age)).toFixed(3)})`; ctx.beginPath(); ctx.arc(x,this.y,r,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle=`rgba(255,240,170,${(0.8*(1-age*1.6)).toFixed(3)})`; ctx.beginPath(); ctx.arc(x,this.y,Math.max(0.5,r*0.4),0,Math.PI*2); ctx.fill();
+      } else {
+        const p=0.8+Math.random()*0.3;
+        ctx.fillStyle="rgba(150,90,255,0.35)"; ctx.beginPath(); ctx.arc(x,this.y,10*p,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="rgba(200,160,255,0.9)"; ctx.beginPath(); ctx.arc(x,this.y,4.5,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(x,this.y,2,0,Math.PI*2); ctx.fill();
+      }
+      ctx.restore(); return;
+    }
     if(this.kind==="acid"){
       const x=this.x-cam.x; ctx.save(); ctx.globalCompositeOperation="lighter";
       ctx.fillStyle="rgba(120,255,70,0.35)"; ctx.beginPath(); ctx.arc(x,this.y,5,0,Math.PI*2); ctx.fill();
@@ -963,6 +983,7 @@ class Particle extends Entity{
   draw(cam){
     const a=clamp(this.life/this.max,0,1);
     if(this.type==="smoke") drawSprite(SPRITES.smoke,this.x-cam.x-6,this.y-6,1,false,a);
+    else if(this.type==="rock"){ ctx.save();ctx.globalAlpha=a;ctx.fillStyle="#6b5037";ctx.fillRect(Math.round(this.x-cam.x),Math.round(this.y),2,2);ctx.restore(); }
     else if(this.type==="acid"){ ctx.save();ctx.globalAlpha=a;ctx.fillStyle=Math.random()<.5?"#b8ff5a":"#6fe03a";ctx.fillRect(Math.round(this.x-cam.x),Math.round(this.y),2,2);ctx.restore(); }
     else if(this.type==="casing"){
       ctx.globalAlpha=a;ctx.fillStyle=PAL["6"];ctx.fillRect(Math.round(this.x-cam.x),Math.round(this.y),1,2);ctx.globalAlpha=1;
@@ -1025,8 +1046,8 @@ class ScorePopup extends Entity{
 }
 class Boomerang extends Entity{
   // sale disparado, frena, y vuelve a la mano del lanzador atravesando enemigos
-  constructor(owner,x,y,nx,ny){
-    super(x,y); this.owner=owner; this.hb={x:-7,y:-5,w:14,h:10};
+  constructor(owner,x,y,nx,ny,big=false){
+    super(x,y); this.owner=owner; this.big=big; this.hb=big?{x:-13,y:-9,w:26,h:18}:{x:-7,y:-5,w:14,h:10};
     this.vx=nx*250; this.vy=ny*225; this.t=0; this.spin=0; this.returning=false;
     this.hitSet=new Set(); this.trail=[];
   }
@@ -1047,7 +1068,7 @@ class Boomerang extends Entity{
     for(const e of entities){
       if(e.dead||this.hitSet.has(e)||!aabb(b,box(e)))continue;
       if(isHostile(e)){
-        this.hitSet.add(e); e.hurt(2,"shot",sign(this.vx)||1); impactPuff(this.x,this.y);
+        this.hitSet.add(e); e.hurt(this.big?4:2,"shot",sign(this.vx)||1); impactPuff(this.x,this.y);
       } else if(e instanceof Crate){ this.hitSet.add(e); e.hurt(2); }
       else if(e instanceof Hostage&&!e.freed){ e.free(); }
     }
@@ -1057,13 +1078,13 @@ class Boomerang extends Entity{
     ctx.save(); ctx.globalCompositeOperation="lighter";
     for(let i=0;i<this.trail.length;i++){
       const [tx,ty]=this.trail[i];
-      ctx.fillStyle=`rgba(120,220,255,${((i+1)/this.trail.length*0.35).toFixed(3)})`;
-      ctx.beginPath(); ctx.arc(tx-cam.x,ty,3+i*0.4,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle=`rgba(${this.big?"255,210,90":"120,220,255"},${((i+1)/this.trail.length*0.35).toFixed(3)})`;
+      ctx.beginPath(); ctx.arc(tx-cam.x,ty,(3+i*0.4)*(this.big?1.8:1),0,Math.PI*2); ctx.fill();
     }
     ctx.restore();
     const img=objImages.boomerang;
     ctx.save(); ctx.translate(this.x-cam.x,this.y); ctx.rotate(this.spin);
-    if(imgReady(img)){ ctx.imageSmoothingEnabled=true; ctx.drawImage(img,-10,-10,20,20); }
+    if(imgReady(img)){ ctx.imageSmoothingEnabled=true; const bs=this.big?36:20; if(this.big)ctx.filter="sepia(1) saturate(3) brightness(1.3)"; ctx.drawImage(img,-bs/2,-bs/2,bs,bs); }
     else {
       ctx.globalCompositeOperation="lighter"; ctx.lineCap="round";
       ctx.strokeStyle="rgba(140,230,255,1)"; ctx.lineWidth=3;
@@ -1282,6 +1303,8 @@ class EnemyTank extends Entity{
 }
 // icono, ancho en pantalla, alto/ancho, color del halo
 const ITEM_ICONS={laser:["wLaser",22,1,"80,210,255"],rocket:["wRocket",22,1,"255,170,60"],shieldup:["pShield",13,1,"90,220,255"],rapid:["pRapid",11,1,"255,150,50"],life:["pLife",13,1,"90,255,120"]};
+const POWERS=[{kind:"minigun",name:"MINIGUN",ammo:220},{kind:"flame",name:"LANZALLAMAS",ammo:160},{kind:"plasma",name:"CANON DE PLASMA",ammo:24},{kind:"giant",name:"BOOMERANG GIGANTE",time:25}];
+const POWER_ICONS=[["wMinigun",24,1,"255,200,80"],["wFlame",24,1,"255,120,40"],["wPlasma",24,1,"170,120,255"],["boomerang",18,1,"255,220,90"]];
 class Item extends Entity{
   constructor(x,y,type){super(x,y);this.type=type;this.vy=-65;this.life=10;this.hb={x:-5,y:-5,w:10,h:10};}
   update(dt){
@@ -1290,7 +1313,7 @@ class Item extends Entity{
     if(player && !player.dead && aabb(box(player),box(this))){pickupItem(this);this.dead=true;}
   }
   draw(cam){
-    const icon=ITEM_ICONS[this.type], img=icon&&objImages[icon[0]];
+    const icon=this.type==="power"?POWER_ICONS[player.charIndex]:ITEM_ICONS[this.type], img=icon&&objImages[icon[0]];
     if(!imgReady(img)){ drawSprite(SPRITES.item,this.x-cam.x-8,this.y-8,2); return; }
     const t=performance.now()/1000, bob=Math.sin(t*4+this.x)*1.5, w=icon[1], h=w*icon[2];
     if(this.life<2.5&&Math.floor(t*10)%2)return;
@@ -1476,7 +1499,7 @@ class Mech extends Entity{
 }
 class Robot extends Mech{
   // soldado robot: camina pesado, mantiene distancia y dispara rafagas de 3 rayos
-  constructor(x,y){ super(x,y,CONFIG.ROBOT.hp); this.hb={x:6,y:0,w:18,h:31}; this.cool=rnd(.8,1.6); this.burst=0; this.burstT=0; this.flip=true; }
+  constructor(x,y){ super(x,y,CONFIG.ROBOT.hp); this.hb={x:6,y:0,w:18,h:31}; this.cool=rnd(.8,1.6); this.burst=0; this.burstT=0; this.flip=true; this.emerge=0; }
   destroy(){
     this.dead=true; game.score+=400; SFX.mechdie(); this.blast(this.x+14,this.y+12,false); this.debris(this.x+14,this.y+12,10);
     entities.push(new ScorePopup(this.x+14,this.y-8,"+400")); this.drop(0.25,["rapid","shieldup","laser"]);
@@ -1490,6 +1513,11 @@ class Robot extends Mech{
   }
   update(dt){
     this.t+=dt; this.flash-=dt;
+    if(this.emerge>0){
+      this.emerge=Math.max(0,this.emerge-dt*1.1); this.vx=0;
+      if(Math.random()<dt*25)particles.push(new Particle(this.x+14+rnd(-10,10),groundYAt(this.x+14)-2,rnd(-40,40),rnd(-90,-30),rnd(.3,.6),Math.random()<.5?"rock":"smoke"));
+      this.vy+=CONFIG.PLAYER.gravity*dt; collideWorld(this,dt); return;
+    }
     const dx=player.x-this.x, ad=Math.abs(dx);
     if(ad<220){
       this.flip=dx<0;
@@ -1505,10 +1533,13 @@ class Robot extends Mech{
   draw(cam){
     if(!imgReady(enemyRobotImg))return;
     const x=this.x-cam.x;
-    ctx.save(); ctx.filter=this.filterFx;
-    drawCharImg(enemyRobotImg,x+14,this.y+31,42,this.flip,this.anim,Math.abs(this.vx)>3);
+    const eo=this.emerge*38;
+    ctx.save();
+    if(eo>0){ ctx.beginPath(); ctx.rect(x-30,-80,90,groundYAt(this.x+14)+82); ctx.clip(); }
+    ctx.filter=this.filterFx;
+    drawCharImg(enemyRobotImg,x+14,this.y+31+eo,42,this.flip,this.anim,Math.abs(this.vx)>3);
     ctx.restore();
-    const k=42/300; this.glow(x+14+(this.flip?-1:1)*(172-150)*k,this.y-11+42*k,2.4,0.45+0.3*Math.sin(this.t*8));
+    const k=42/300; if(eo<20)this.glow(x+14+(this.flip?-1:1)*(172-150)*k,this.y-11+42*k+eo,2.4,0.45+0.3*Math.sin(this.t*8));
   }
 }
 class Drone extends Mech{
@@ -1549,6 +1580,10 @@ class Drone extends Mech{
     this.tilt+=((this.vx/75)*0.3-this.tilt)*Math.min(1,dt*5);
   }
   draw(cam){
+    const gy=groundYAt(this.x); ctx.save(); ctx.beginPath(); ctx.rect(this.x-cam.x-40,-80,80,gy+84); ctx.clip();
+    this.drawBody(cam); ctx.restore();
+  }
+  drawBody(cam){
     const img=objImages.drone; if(!imgReady(img))return;
     const x=this.x-cam.x, y=this.y, w=36, k=w/250, gy=groundYAt(this.x), hgt=gy-y;
     ctx.save(); ctx.globalAlpha=clamp(0.3-hgt/400,0.06,0.3); ctx.fillStyle="#000";
@@ -1987,6 +2022,76 @@ class SandQueen extends Entity{
     ctx.restore();
   }
 }
+/* ============================================================
+   TERREMOTO A MITAD DEL NIVEL: robots salen de la tierra y cae un arma especial
+   ============================================================ */
+const QUAKE={x:1600, waves:[["r","r","r"],["r","d","r"],["r","r","d","r"]]};
+function startQuake(){
+  game.quake={t:0,wave:0,waveT:1.6,spawned:[],cracks:[],done:false,doneT:0,shakeT:2.5,crate:false,camX:clamp(player.x-110,0,WORLD_W-CONFIG.W)};
+  SFX.quake(); SFX.boss();
+}
+function updateQuake(dt){
+  const q=game.quake; if(!q)return;
+  q.t+=dt; if(q.done)return;
+  q.shakeT-=dt; shake(q.shakeT>0?5:1.2,0.08);
+  if(Math.random()<dt*(q.shakeT>0?14:3))particles.push(new Particle(q.camX+rnd(0,CONFIG.W),rnd(-10,30),rnd(-10,10),rnd(20,60),rnd(.8,1.4),"rock"));
+  if(!q.crate&&q.t>1.0){ q.crate=true; entities.push(new SupplyDrop(clamp(player.x+70,q.camX+40,q.camX+CONFIG.W-40))); }
+  const alive=q.spawned.filter(e=>!e.dead&&!e.dying).length;
+  if(q.wave<QUAKE.waves.length){
+    q.waveT-=dt;
+    if(q.waveT<=0&&alive===0){
+      const kinds=QUAKE.waves[q.wave], n=kinds.length;
+      kinds.forEach((k,i)=>{
+        let x=q.camX+40+(i+0.5)*(CONFIG.W-80)/n+rnd(-10,10);
+        if(Math.abs(x-player.x)<34)x+=player.x<q.camX+CONFIG.W/2?50:-50;
+        const e=k==="d"?new Drone(x,groundYAt(x)+14):new Robot(x-14,groundYAt(x)-31);
+        if(k==="r")e.emerge=1+i*0.25;
+        entities.push(e); q.spawned.push(e); q.cracks.push({x,t:q.t});
+        for(let j=0;j<8;j++)particles.push(new Particle(x,groundYAt(x)-2,rnd(-60,60),rnd(-120,-40),rnd(.4,.8),j%2?"rock":"smoke"));
+      });
+      q.shakeT=1.2; SFX.quake(); q.wave++; q.waveT=1.2;
+    }
+  } else if(alive===0){
+    q.done=true; q.doneT=q.t; game.score+=5000; SFX.rescue();
+    entities.push(new ScorePopup(player.x+14,player.y-20,"+5000"));
+  }
+}
+function drawQuakeFx(){
+  const q=game.quake; if(!q)return;
+  for(const c of q.cracks){
+    const x=c.x-cam.x; if(x<-30||x>CONFIG.W+30)continue;
+    const gy=groundYAt(c.x), a=Math.min(1,(q.t-c.t)*3), w=18*a;
+    ctx.save(); ctx.fillStyle="rgba(20,10,4,0.9)"; ctx.beginPath(); ctx.ellipse(x,gy+2,12*a,3*a,0,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle="rgba(30,15,5,0.85)"; ctx.lineWidth=2; ctx.beginPath();
+    ctx.moveTo(x-w,gy+1); ctx.lineTo(x-w*0.4,gy+3); ctx.lineTo(x,gy+1); ctx.lineTo(x+w*0.5,gy+4); ctx.lineTo(x+w,gy+1); ctx.stroke();
+    ctx.restore();
+  }
+}
+function drawQuakeText(){
+  const q=game.quake; if(!q||game.state!=="PLAY"||game.lair)return;
+  if(!q.done&&q.t<2.8&&blinkOn()){
+    textPx("TERREMOTO",CONFIG.W/2+1,47,3,PAL["G"],"center"); textPx("TERREMOTO",CONFIG.W/2,46,3,PAL["K"],"center");
+    textPx("ROBOTS SALIENDO DE LA TIERRA",CONFIG.W/2,68,1,PAL["7"],"center");
+  }
+  if(!q.done&&q.wave>0) textPx("OLEADA "+q.wave+" DE "+QUAKE.waves.length,CONFIG.W-8,26,1,PAL["J"],"right");
+  if(q.done&&q.t-q.doneT<2.5){ textPx("ZONA DESPEJADA",CONFIG.W/2+1,51,2,PAL["G"],"center"); textPx("ZONA DESPEJADA",CONFIG.W/2,50,2,PAL["K"],"center"); }
+}
+class SupplyDrop extends Entity{
+  // caja con paracaidas que trae el arma especial del personaje
+  constructor(x){ super(x,-40); this.t=0; }
+  update(dt){
+    this.t+=dt; this.y+=60*dt; this.x+=Math.sin(this.t*2)*12*dt;
+    const g=groundYAt(this.x)-10;
+    if(this.y>=g){ this.dead=true; const it=new Item(this.x,g,"power"); it.life=30; entities.push(it); impactPuff(this.x,g+8); SFX.pickup(); }
+  }
+  draw(cam){
+    const img=objImages.chute;
+    ctx.save(); ctx.translate(this.x-cam.x,this.y+8); ctx.rotate(Math.sin(this.t*2)*0.12);
+    if(imgReady(img)){ const b=alphaBox(img), w=36, h=(b.y1-b.y0)*w/(b.x1-b.x0); ctx.imageSmoothingEnabled=true; ctx.drawImage(img,b.x0,b.y0,b.x1-b.x0,b.y1-b.y0,-w/2,-h,w,h); }
+    else { ctx.fillStyle="#6c7136"; ctx.beginPath(); ctx.arc(0,-30,16,Math.PI,0); ctx.fill(); ctx.fillStyle="#a96b35"; ctx.fillRect(-6,-10,12,10); }
+    ctx.restore();
+  }
+}
 class Turret extends Entity{
   constructor(x,y){super(x,y);this.hp=CONFIG.TURRET.hp;this.cool=rnd(.2,1);this.hb={x:2,y:4,w:28,h:20};}
   hurt(d,kind="shot"){this.hp-=d;this.flash=0.07; if(this.hp<=0){this.dead=true;game.score+=500;explode(this.x+16,this.y+12,34,2,"player");}}
@@ -2113,15 +2218,15 @@ class Player extends Entity{
     super(x,y);this.hb={x:6,y:2,w:16,h:29};this.lives=CONFIG.PLAYER.lives;this.grenades=CONFIG.PLAYER.grenadeCount;
     this.special=0;this.rifleAmmo=0;this.fireCd=0;this.knifeCd=0;this.knifeT=0;this.invuln=1;this.facing=1;this.inTank=null;this.crouch=false;
     this.lastStep=-1;this.charIndex=game.charIndex||0;this.throwT=0;this.shield=100;this.shieldOn=false;this.shieldFlash=0;
-    this.laserAmmo=0;this.rocketAmmo=0;this.rapidT=0;this.shieldBoost=0;
+    this.laserAmmo=0;this.rocketAmmo=0;this.rapidT=0;this.shieldBoost=0;this.power=null;
   }
   die(){
     if(this.invuln>0||game.state!=="PLAY"||this.inTank)return;
     this.lives--;SFX.death();shake(6,.25);
     for(let i=0;i<8;i++)particles.push(new Particle(this.x+14,this.y+12,rnd(-90,90),rnd(-150,-45),rnd(.35,.8)));
-    this.special=0;this.rifleAmmo=0;this.laserAmmo=0;this.rocketAmmo=0;this.grenades=CONFIG.PLAYER.grenadeCount;this.shield=100;this.shieldOn=false;
+    this.special=0;this.rifleAmmo=0;this.laserAmmo=0;this.rocketAmmo=0;this.power=null;this.grenades=CONFIG.PLAYER.grenadeCount;this.shield=100;this.shieldOn=false;
     if(this.lives<=0){game.state="GAMEOVER";return;}
-    this.x=Math.max(game.checkpoint,48);this.y=80;this.vx=0;this.vy=0;this.invuln=CONFIG.PLAYER.invulnRespawn;
+    this.x=game.quake&&!game.quake.done?game.quake.camX+40:Math.max(game.checkpoint,48);this.y=80;this.vx=0;this.vy=0;this.invuln=CONFIG.PLAYER.invulnRespawn;
   }
   update(dt){
     if(this.inTank){this.invuln=Math.max(0,this.invuln-dt);return;}
@@ -2136,6 +2241,7 @@ class Player extends Entity{
       this.shieldOn=true; this.shield=Math.max(0,this.shield-CONFIG.SHIELD.drain*dt*(this.shieldBoost>0?0:1));
       if(this.shield<=0){this.shieldOn=false;SFX.shieldBreak();}
     } else { this.shieldOn=false; this.shield=Math.min(100,this.shield+CONFIG.SHIELD.regen*dt); }
+    if(this.power&&this.power.time!==undefined){ this.power.time-=dt; if(this.power.time<=0)this.power=null; }
     this.shieldFlash-=dt; this.shieldBoost-=dt; this.rapidT-=dt; if(this.rapidT>0)this.fireCd-=dt;
     const target=move*CONFIG.PLAYER.run, acc=this.onGround?CONFIG.PLAYER.accel:CONFIG.PLAYER.airAccel;
     if(move&&!this.shieldOn) this.vx += clamp(target-this.vx,-acc*dt,acc*dt);
@@ -2154,11 +2260,29 @@ class Player extends Entity{
 
     const aim=aimVector(this.facing,L,R,down("d")||gp?.aimUp,D&&!this.onGround);
     if((down("s","z")||gp?.fire)&&this.fireCd<=0&&!this.crouch&&!this.shieldOn){
-      if(heroImages[this.charIndex].weapon==="boomerang"){
+      const pw=this.power;
+      if(pw&&pw.kind!=="giant"&&pw.ammo>0){
+        const bx=this.x+14+aim.x*14, by=this.y+12+aim.y*8, base=Math.atan2(aim.y,aim.x);
+        if(pw.kind==="minigun"){
+          this.fireCd=0.045; pw.ammo--; SFX.shot(); const a=base+rnd(-0.07,0.07);
+          entities.push(new Bullet(bx,by,Math.cos(a)*330,Math.sin(a)*330,"player",1,"tracer"));
+          casing(this.x+13,this.y+9,this.facing); muzzleFlash(bx,by,aim.x,aim.y,7); addLight(bx,by,30,"255,200,90",.05); shake(1,.03);
+        } else if(pw.kind==="flame"){
+          this.fireCd=0.035; pw.ammo--; if(Math.random()<.35)noise(0.06,0.05);
+          const a=base+rnd(-0.12,0.12), sp=rnd(150,190);
+          entities.push(new Bullet(bx,by,Math.cos(a)*sp+this.vx*0.5,Math.sin(a)*sp-10,"player",1,"flame"));
+          addLight(bx+aim.x*20,by,36,"255,130,40",.05);
+        } else {
+          this.fireCd=0.35; pw.ammo--; SFX.laser();
+          entities.push(new Bullet(bx,by,aim.x*260,aim.y*260,"player",4,"plasma"));
+          muzzleFlash(bx,by,aim.x,aim.y,9); addLight(bx,by,44,"170,120,255",.12); shake(2,.06);
+        }
+        if(pw.ammo<=0)this.power=null;
+      } else if(heroImages[this.charIndex].weapon==="boomerang"){
         // el chico no usa armas de fuego: lanza su boomerang laser (maximo 2 en vuelo)
-        if(entities.filter(e=>e instanceof Boomerang&&!e.dead).length<(this.rapidT>0?3:2)){
+        if(entities.filter(e=>e instanceof Boomerang&&!e.dead).length<(this.rapidT>0||this.power?.kind==="giant"?3:2)){
           this.fireCd=0.28; this.throwT=0.22; SFX.boomerang();
-          entities.push(new Boomerang(this,this.x+14+aim.x*14,this.y+12+aim.y*8,aim.x,aim.y));
+          entities.push(new Boomerang(this,this.x+14+aim.x*14,this.y+12+aim.y*8,aim.x,aim.y,this.power?.kind==="giant"));
           addLight(this.x+14+aim.x*16,this.y+12,22,"120,220,255",0.08);
         }
       } else if(this.rocketAmmo>0){
@@ -2285,9 +2409,9 @@ function handleBulletHit(b){
     for(const e of entities){
       if(e.dead||e===b)continue;
       if((isHostile(e)||e instanceof Crate) && aabb(box(b),box(e))){
-        if(b.kind==="laser"){ if(b.hitSet.has(e))continue; b.hitSet.add(e); }
+        if(b.pierce){ if(b.hitSet.has(e))continue; b.hitSet.add(e); }
         if(e instanceof Crate)e.hurt(b.damage); else e.hurt(b.damage,b.kind==="cannon"?"explosion":"shot",sign(b.vx));
-        impactPuff(b.x,b.y); if(b.kind!=="laser"){b.dead=true;return;}
+        if(b.kind!=="flame")impactPuff(b.x,b.y); if(!b.pierce){b.dead=true;return;}
       }
     }
   }else{
@@ -2336,7 +2460,8 @@ function casing(x,y,dir=1){particles.push(new Particle(x,y,-dir*rnd(18,34),rnd(-
 function pickupItem(i){
   const p=player, kid=heroImages[p.charIndex].weapon==="boomerang", t=i.type;
   let label=null;
-  if(["shotgun","rifle","laser","rocket"].includes(t)&&kid){ p.rapidT=Math.max(p.rapidT,10); label="BOOMERANG TURBO"; }
+  if(t==="power"){ const d=POWERS[p.charIndex]; p.power={...d}; p.special=p.rifleAmmo=p.laserAmmo=p.rocketAmmo=0; label="ARMA ESPECIAL "+d.name; SFX.powerup(); flashScreen(.3); addLight(i.x,i.y,60,POWER_ICONS[p.charIndex][3],.3); }
+  else if(["shotgun","rifle","laser","rocket"].includes(t)&&kid){ p.rapidT=Math.max(p.rapidT,10); label="BOOMERANG TURBO"; }
   else if(t==="shotgun"){p.special=CONFIG.SHOTGUN.ammo;p.laserAmmo=p.rocketAmmo=0;label="ESCOPETA";}
   else if(t==="rifle"){p.rifleAmmo=CONFIG.RIFLE.ammo;p.special=p.laserAmmo=p.rocketAmmo=0;label="RIFLE";}
   else if(t==="laser"){p.laserAmmo=CONFIG.LASER.ammo;p.special=p.rifleAmmo=p.rocketAmmo=0;label="RIFLE LASER";}
@@ -2440,13 +2565,13 @@ const game={
 };
 function startGame(full=true){
   if(full){game.score=0;game.hostages=0;game.continues=CONFIG.CONTINUES;game.runTime=0;}
-  game.lair=false;game.trans=null;
+  game.lair=false;game.trans=null;game.quake=null;
   player=new Player(50,120);buildLevel();if(heroImages[game.charIndex].weapon==="boomerang")entities.push(new Buddy(player));game.checkpoint=48;game.state="PLAY";game.paused=false;cam.x=0;
 }
 function continueGame(){
   if(game.continues<=0){game.state="TITLE";return;}
   if(game.lair){ game.continues--; player=new Player(40,120); buildLair(); game.state="PLAY"; return; }
-  game.continues--; player=new Player(Math.max(game.checkpoint,48),120);buildLevel();if(heroImages[game.charIndex].weapon==="boomerang")entities.push(new Buddy(player));
+  game.continues--; game.quake=null; player=new Player(Math.max(game.checkpoint,48),120);buildLevel();if(heroImages[game.charIndex].weapon==="boomerang")entities.push(new Buddy(player));
   // Eliminar spawns muy atrás del checkpoint
   for(const e of entities) if(e.x<game.checkpoint-180 && !(e instanceof Tank))e.dead=true;
   game.state="PLAY";
@@ -2491,6 +2616,9 @@ function update(dt){
 
   updateDescent(dt);
   if(!game.lair){
+  if(!game.quake&&player.x>QUAKE.x)startQuake();
+  updateQuake(dt);
+  if(game.quake&&!game.quake.done){ const q=game.quake; player.x=clamp(player.x,q.camX,q.camX+CONFIG.W-28); if(player.inTank)player.inTank.x=clamp(player.inTank.x,q.camX,q.camX+CONFIG.W-44); }
   // Checkpoints
   if(player.x>900)game.checkpoint=Math.max(game.checkpoint,900);
   if(player.x>1750)game.checkpoint=Math.max(game.checkpoint,1750);
@@ -2515,7 +2643,7 @@ function update(dt){
   }
 
   // Cámara
-  let target=game.lair?0:player.x-110;
+  let target=game.lair?0:game.quake&&!game.quake.done?game.quake.camX:player.x-110;
   if(boss&&!game.lair)target=clamp(target,CONFIG.WORLD.bossTrigger-70,WORLD_W-CONFIG.W);
   cam.x+=clamp(target-cam.x,-150*dt,150*dt);cam.x=clamp(cam.x,0,WORLD_W-CONFIG.W);
   if(cam.shakeT>0){cam.shakeT-=dt;cam.sx=rnd(-cam.shakeMag,cam.shakeMag);cam.sy=rnd(-cam.shakeMag,cam.shakeMag);}
@@ -2797,7 +2925,7 @@ function render(){
   ctx.save();
   ctx.translate(Math.round(cam.sx),Math.round(cam.sy));
   if(game.lair&&game.state!=="TITLE"){ drawLairBg(); drawGround(); }
-  else { drawSky();drawMidground();drawFarPalms();drawForeground(); }
+  else { drawSky();drawMidground();drawFarPalms();drawForeground();drawQuakeFx(); }
   for(const m of mortars)m.draw(cam);
   // Orden simple por y
   const renderList=entities.slice().sort((a,b)=>a.y-b.y);
@@ -2809,6 +2937,7 @@ function render(){
   ctx.restore();
   drawScreenFlash();
   drawDescent();
+  drawQuakeText();
   drawHUD();
   if(game.state==="TITLE")drawTitle();
   if(game.state==="CHARSELECT")drawCharSelect();
@@ -2846,8 +2975,9 @@ function drawHUD(){
   drawSprite(SPRITES.icon_medal,4,3,2);
   textPx("x"+Math.max(0,player.lives),22,6,1,PAL["7"]);
 
-  const heavyAmmo=player.rocketAmmo||player.laserAmmo||player.special||player.rifleAmmo;
-  const wIcon=player.rocketAmmo>0?objImages.wRocket:player.laserAmmo>0?objImages.wLaser:null;
+  const pw=player.power;
+  const heavyAmmo=pw?(pw.ammo??Math.ceil(pw.time)):(player.rocketAmmo||player.laserAmmo||player.special||player.rifleAmmo);
+  const wIcon=pw?objImages[POWER_ICONS[player.charIndex][0]]:player.rocketAmmo>0?objImages.wRocket:player.laserAmmo>0?objImages.wLaser:null;
   if(wIcon&&imgReady(wIcon)){ctx.save();ctx.imageSmoothingEnabled=true;ctx.drawImage(wIcon,62,1,20,20);ctx.restore();}
   else drawSprite(SPRITES.item,66,4,2);
   textPx(heavyAmmo>0?("x"+heavyAmmo):"---",86,6,1,heavyAmmo>0?PAL["K"]:PAL["M"]);
