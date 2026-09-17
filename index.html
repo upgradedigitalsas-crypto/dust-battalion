@@ -823,7 +823,7 @@ function noise(dur=0.08,vol=0.2){
   s.connect(g); g.connect(master); s.start();
 }
 const sfxClips={};
-for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm","yell","boomerang","cannon","bark","bark2","laser","rocket","powerup","stomp","drone","mechdie","roar","acid","splat","charge","beam","screech","quake","gunshot","loading","droneshot","grenadepin","grenadebounce"]){
+for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm","yell","boomerang","cannon","bark","bark2","laser","rocket","powerup","stomp","drone","mechdie","roar","acid","splat","charge","beam","screech","quake","gunshot","loading","droneshot","grenadepin","grenadebounce","grenadethrow"]){
   const a=new Audio("assets/sfx/"+n+".mp3"); a.preload="auto"; sfxClips[n]=a;
 }
 function playClip(name,vol){
@@ -846,6 +846,7 @@ const SFX={
   gunshot(){playClip("gunshot",0.5);},
   droneShot(){playClip("droneshot",0.5);},
   grenadePin(){playClip("grenadepin",0.7);},
+  grenadeThrow(){playClip("grenadethrow",0.6);},
   grenadeBounce(){playClip("grenadebounce",0.65);},
   shot(){playClip("shot",0.5);},
   shotgun(){playClip("shotgun",0.6);},
@@ -2393,7 +2394,7 @@ class Player extends Entity{
         casing(this.x+13,this.y+9,this.facing);
       }
     }
-    if((hit("c","l")||gp?.nade)&&this.grenades>0&&heroImages[this.charIndex].weapon!=="boomerang"&&!this.shieldOn){this.grenades--;SFX.grenadePin();entities.push(new Grenade(this.x+14,this.y+10,this.facing));}
+    if((hit("c","l")||gp?.nade)&&this.grenades>0&&heroImages[this.charIndex].weapon!=="boomerang"&&!this.shieldOn){this.grenades--;SFX.grenadePin();SFX.grenadeThrow();entities.push(new Grenade(this.x+14,this.y+10,this.facing));}
     if((hit("shift")||gp?.knife)&&this.knifeCd<=0&&!this.shieldOn){
       this.knifeCd=CONFIG.PLAYER.knifeCooldown;this.knifeT=CONFIG.PLAYER.knifeTime;SFX.knife();melee(this);
     }
