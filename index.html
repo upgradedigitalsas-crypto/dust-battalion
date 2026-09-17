@@ -951,7 +951,7 @@ function noise(dur=0.08,vol=0.2){
   s.connect(g); g.connect(master); s.start();
 }
 const sfxClips={};
-for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm","yell","boomerang","cannon","bark","bark2","laser","rocket","powerup","stomp","drone","mechdie","roar","acid","splat","charge","beam","screech","quake","gunshot","loading","droneshot","grenadepin","grenadebounce","grenadethrow","thunder"]){
+for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm","yell","boomerang","cannon","bark","bark2","laser","rocket","powerup","stomp","drone","mechdie","roar","acid","splat","charge","beam","screech","quake","gunshot","loading","droneshot","grenadepin","grenadebounce","grenadethrow","thunder","victory","collapse"]){
   const a=new Audio("assets/sfx/"+n+".mp3"); a.preload="auto"; sfxClips[n]=a;
 }
 function playClip(name,vol){
@@ -976,6 +976,8 @@ const SFX={
   grenadePin(){playClip("grenadepin",0.7);},
   grenadeThrow(){playClip("grenadethrow",0.6);},
   thunder(){playClip("thunder",0.55);},
+  victory(){playClip("victory",0.7);},
+  collapse(){playClip("collapse",0.65);},
   grenadeBounce(){playClip("grenadebounce",0.65);},
   shot(){playClip("shot",0.5);},
   shotgun(){playClip("shotgun",0.6);},
@@ -2553,7 +2555,7 @@ class StormBolt extends Entity{
 const OUTRO={runAt:3.0, fadeAt:6.4, end:8.0};
 function startOutro(){
   game.outro={t:0, rockT:0, spawned:false};
-  SFX.quake(); SFX.screech(); shake(6,1.2);
+  SFX.quake(); SFX.screech(); SFX.collapse(); shake(6,1.2);
   if(player)player.invuln=999;
 }
 function updateOutro(dt){
@@ -2564,11 +2566,11 @@ function updateOutro(dt){
   if(o.rockT<=0){ o.rockT=o.t<OUTRO.runAt?0.12:0.2; entities.push(new CeilingRock(rnd(10,CONFIG.W-10))); }
   if(Math.random()<dt*10)particles.push(new Particle(rnd(0,CONFIG.W),rnd(0,40),rnd(-10,10),rnd(20,60),rnd(.8,1.4),"rock"));
   if(!o.spawned&&o.t>=OUTRO.runAt){
-    o.spawned=true; SFX.yell(); SFX.rescue();
+    o.spawned=true; SFX.yell(); SFX.rescue(); SFX.collapse();
     const n=Math.max(1,Math.min(3,game.hostages));
     for(let i=0;i<n;i++)entities.push(new EscapeRunner(player.x-24-i*22,LAIR.ground-30,i));
   }
-  if(o.t>=OUTRO.end){ game.outro=null; game.clearTime=game.runTime; game.state="EPILOGO"; game.epi={p:0,t:0}; }
+  if(o.t>=OUTRO.end){ game.outro=null; game.clearTime=game.runTime; game.state="EPILOGO"; game.epi={p:0,t:0}; SFX.victory(); }
 }
 // Epilogo tipo historieta: el heroe a un costado y su cuadro de dialogo
 function epilogueLines(){
