@@ -9,10 +9,12 @@
   html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#120d0b}
   body{display:flex;align-items:center;justify-content:center}
   canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;background:#241813;box-shadow:0 0 0 2px #090706}
+  #shader{position:fixed;left:0;top:0;pointer-events:none;opacity:0;transition:opacity .5s ease;background:#000;box-shadow:none;image-rendering:auto;z-index:2}
 </style>
 </head>
 <body>
 <canvas id="game" width="384" height="224" aria-label="Dust Battalion"></canvas>
+<canvas id="shader" aria-hidden="true"></canvas>
 <script>
 "use strict";
 
@@ -817,7 +819,7 @@ function noise(dur=0.08,vol=0.2){
   s.connect(g); g.connect(master); s.start();
 }
 const sfxClips={};
-for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm","yell","boomerang","cannon","bark","bark2","laser","rocket","powerup","stomp","drone","mechdie","roar","acid","splat","charge","beam","screech","quake","gunshot"]){
+for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm","yell","boomerang","cannon","bark","bark2","laser","rocket","powerup","stomp","drone","mechdie","roar","acid","splat","charge","beam","screech","quake","gunshot","loading"]){
   const a=new Audio("assets/sfx/"+n+".mp3"); a.preload="auto"; sfxClips[n]=a;
 }
 function playClip(name,vol){
@@ -2726,6 +2728,85 @@ function continueGame(){
 function shake(mag,t){cam.shakeMag=Math.max(cam.shakeMag,mag);cam.shakeT=Math.max(cam.shakeT,t);}
 
 /* ============================================================
+   PANTALLA DE CARGA: shader WebGL2 animado sin texto
+   Shader original de Matthias Hurrle (@atzedent), adaptado del componente "animated-shader-hero"
+   ============================================================ */
+const LOAD_TIME=4.2;
+const loader=(()=>{
+  const cv=document.getElementById("shader"), gl=cv.getContext("webgl2");
+  let prog=null, tried=false, raf=0, on=false, uRes=null, uTime=null, t0=Math.random()*40;
+  const VS=`#version 300 es
+precision highp float;
+in vec4 position;
+void main(){gl_Position=position;}`;
+  const FS=`#version 300 es
+precision highp float;
+out vec4 O;
+uniform vec2 resolution;
+uniform float time;
+#define FC gl_FragCoord.xy
+#define T time
+#define R resolution
+#define MN min(R.x,R.y)
+float rnd(vec2 p){p=fract(p*vec2(12.9898,78.233));p+=dot(p,p+34.56);return fract(p.x*p.y);}
+float noise(in vec2 p){vec2 i=floor(p),f=fract(p),u=f*f*(3.-2.*f);float a=rnd(i),b=rnd(i+vec2(1,0)),c=rnd(i+vec2(0,1)),d=rnd(i+1.);return mix(mix(a,b,u.x),mix(c,d,u.x),u.y);}
+float fbm(vec2 p){float t=.0,a=1.;mat2 m=mat2(1.,-.5,.2,1.2);for(int i=0;i<5;i++){t+=a*noise(p);p*=2.*m;a*=.5;}return t;}
+float clouds(vec2 p){float d=1.,t=.0;for(float i=.0;i<3.;i++){float a=d*fbm(i*10.+p.x*.2+.2*(1.+i)*p.y+d+i*i+p);t=mix(t,d,a);d=a;p*=2./(i+1.);}return t;}
+void main(void){
+  vec2 uv=(FC-.5*R)/MN,st=uv*vec2(2,1);
+  vec3 col=vec3(0);
+  float bg=clouds(vec2(st.x+T*.5,-st.y));
+  uv*=1.-.3*(sin(T*.2)*.5+.5);
+  for(float i=1.;i<12.;i++){
+    uv+=.1*cos(i*vec2(.1+.01*i,.8)+i*i+T*.5+.1*uv.x);
+    vec2 p=uv;
+    float d=length(p);
+    col+=.00125/d*(cos(sin(i)*vec3(1,2,3))+1.);
+    float b=noise(i+p+bg*1.731);
+    col+=.002*b/length(max(p,vec2(b*p.x*.02,p.y)));
+    col=mix(col,vec3(bg*.25,bg*.137,bg*.05),d);
+  }
+  O=vec4(col,1);
+}`;
+  function build(){
+    tried=true; if(!gl)return false;
+    const sh=(type,src)=>{ const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s); if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){ console.error(gl.getShaderInfoLog(s)); return null; } return s; };
+    const vs=sh(gl.VERTEX_SHADER,VS), fs=sh(gl.FRAGMENT_SHADER,FS); if(!vs||!fs)return false;
+    const p=gl.createProgram(); gl.attachShader(p,vs); gl.attachShader(p,fs); gl.linkProgram(p);
+    if(!gl.getProgramParameter(p,gl.LINK_STATUS)){ console.error(gl.getProgramInfoLog(p)); return false; }
+    gl.useProgram(p);
+    const buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,1,-1,-1,1,1,1,-1]),gl.STATIC_DRAW);
+    const pos=gl.getAttribLocation(p,"position"); gl.enableVertexAttribArray(pos); gl.vertexAttribPointer(pos,2,gl.FLOAT,false,0,0);
+    uRes=gl.getUniformLocation(p,"resolution"); uTime=gl.getUniformLocation(p,"time");
+    prog=p; return true;
+  }
+  function place(){
+    const r=canvas.getBoundingClientRect(), s=Math.max(1,0.5*(window.devicePixelRatio||1));
+    Object.assign(cv.style,{left:r.left+"px",top:r.top+"px",width:r.width+"px",height:r.height+"px"});
+    cv.width=Math.max(1,Math.round(r.width*s)); cv.height=Math.max(1,Math.round(r.height*s));
+    if(gl)gl.viewport(0,0,cv.width,cv.height);
+  }
+  function frame(now){
+    if(!on)return;
+    gl.uniform2f(uRes,cv.width,cv.height); gl.uniform1f(uTime,t0+now*1e-3);
+    gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+    raf=requestAnimationFrame(frame);
+  }
+  return {
+    ok(){ return prog?true:tried?false:build(); },
+    show(){ if(!this.ok())return; on=true; place(); cv.style.opacity="1"; cancelAnimationFrame(raf); raf=requestAnimationFrame(frame); },
+    hide(){ cv.style.opacity="0"; setTimeout(()=>{ if(cv.style.opacity==="0"){ on=false; cancelAnimationFrame(raf); } },600); },
+    place(){ if(on)place(); }
+  };
+})();
+addEventListener("resize",()=>loader.place());
+function assetsReady(){
+  const imgs=[...Object.values(objImages),...heroImages.flatMap(h=>Object.values(h).filter(v=>v instanceof Image))];
+  return imgs.every(i=>i.complete);
+}
+
+/* ============================================================
    ACTUALIZACIÓN
    ============================================================ */
 function update(dt){
@@ -2746,7 +2827,7 @@ function update(dt){
         if(prev<TRANSFORM.flash&&c>=TRANSFORM.flash){ SFX.powerup(); SFX.beam(); }
         if(prev<TRANSFORM.cheer&&c>=TRANSFORM.cheer)SFX.rescue();
       }
-      if(c>=(hcx.transform?TRANSFORM.end:1.5)){ game.cheer=null; startGame(true); if(hcx.transform)player.superT=CONFIG.SUPER.time; }
+      if(c>=(hcx.transform?TRANSFORM.end:1.5)){ game.cheer=null; game.state="LOADING"; game.loadT=0; loader.show(); playClip("loading",0.85); }
       clearPressed(); return;
     }
     if(hit("arrowleft"))game.charIndex=(game.charIndex+heroImages.length-1)%heroImages.length;
@@ -2754,6 +2835,14 @@ function update(dt){
     if(hit("s","z","enter")){ game.cheer={t:0}; if(!heroImages[game.charIndex].transform){ SFX.rescue(); SFX.powerup(); } }
     if(hit("escape","x"))game.state="TITLE";
     clearPressed();return;
+  }
+  if(game.state==="LOADING"){
+    game.loadT+=dt;
+    if((game.loadT>=LOAD_TIME&&(assetsReady()||game.loadT>8))||(game.loadT>1.5&&hit("s","z","enter"))){
+      loader.hide(); startGame(true);
+      if(heroImages[game.charIndex].transform)player.superT=CONFIG.SUPER.time;
+    }
+    clearPressed(); return;
   }
   if(game.state==="GAMEOVER"){
     if(hit("s","z","enter"))continueGame();
@@ -3082,6 +3171,15 @@ function drawForeground(){
   drawScenery();
 }
 function render(){
+  if(game.state==="LOADING"){
+    ctx.fillStyle="#000"; ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
+    if(!loader.ok()){
+      // sin WebGL2: brillo calido pulsante como respaldo
+      const t=game.loadT, g=ctx.createRadialGradient(CONFIG.W/2,CONFIG.H/2,4,CONFIG.W/2,CONFIG.H/2,140+Math.sin(t*3)*20);
+      g.addColorStop(0,"rgba(255,170,70,0.55)"); g.addColorStop(1,"rgba(40,10,0,0)"); ctx.fillStyle=g; ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
+    }
+    return;
+  }
   ctx.save();
   ctx.translate(Math.round(cam.sx),Math.round(cam.sy));
   if(game.lair&&game.state!=="TITLE"){ drawLairBg(); drawGround(); }
