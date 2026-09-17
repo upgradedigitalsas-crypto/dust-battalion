@@ -170,6 +170,55 @@ const groundImages = {
   2: Object.assign(new Image(), {src:"assets/ground-city.jpg"}),
   3: Object.assign(new Image(), {src:"assets/ground-lair.jpg"})
 };
+// Edificios y escombros dibujados por codigo (pixel art) para la destruccion del terremoto
+function seededRand(seed){ return ()=>{ seed=(Math.imul(seed,1664525)+1013904223)>>>0; return seed/4294967296; }; }
+function canvasImage(c){ const i=new Image(); i.src=c.toDataURL(); return i; }
+function proceduralBuilding(v){
+  const R=seededRand(v?777:4242), W=v?66:54, H=v?140:120, top=10, floors=4, fh=Math.floor((H-top)/floors);
+  const pal=v?{base:"#cbb18a",dark:"#9d8563",light:"#e6d3b0",line:"#4a3826"}:{base:"#d0a56a",dark:"#a07a47",light:"#ecc98e",line:"#4b3320"};
+  const c=document.createElement("canvas"); c.width=W; c.height=H; const g=c.getContext("2d");
+  g.fillStyle=pal.base; g.fillRect(0,top,W,H-top);
+  g.globalAlpha=0.3;
+  for(let i=0;i<W*H/5;i++){ g.fillStyle=R()<.5?pal.dark:pal.light; g.fillRect(Math.floor(R()*W),top+Math.floor(R()*(H-top)),1,1); }
+  g.globalAlpha=1;
+  g.fillStyle=pal.dark; g.fillRect(W-5,top,5,H-top);
+  g.fillStyle=pal.line; g.fillRect(0,top,1,H-top); g.fillRect(W-1,top,1,H-top);
+  const cols=v?3:2;
+  for(let f=0;f<floors;f++){
+    const fy=top+f*fh;
+    g.fillStyle=pal.light; g.fillRect(0,fy,W,2); g.fillStyle=pal.line; g.fillRect(0,fy+2,W,1);
+    for(let k=0;k<cols;k++){
+      const ww=v?10:12, wh=v?14:17, wx=Math.round((k+0.5)*(W-4)/cols-ww/2), wy=fy+Math.round((fh-wh)/2)+1;
+      g.fillStyle=pal.line; g.fillRect(wx-1,wy-1,ww+2,wh+2);
+      g.fillStyle="#241710"; g.fillRect(wx,wy,ww,wh);
+      if(!v){ g.fillStyle=pal.base; g.fillRect(wx,wy,2,2); g.fillRect(wx+ww-2,wy,2,2); g.fillStyle=pal.line; g.fillRect(wx+2,wy-2,ww-4,1); }
+      g.fillStyle="#3e2c20"; g.fillRect(wx+1,wy+1,ww-2,3);
+      if(R()<0.35){ g.fillStyle="rgba(255,190,90,0.6)"; g.fillRect(wx+2,wy+wh-6,ww-4,4); }
+      g.fillStyle=pal.light; g.fillRect(wx-2,wy+wh+1,ww+4,2);
+    }
+    if(v&&f===1){ for(let x=4;x<W-8;x+=4){ g.fillStyle=(x/4)%2?"#e07a2a":"#f0c060"; g.fillRect(x,fy+fh-7,4,4); } g.fillStyle="#7a3a14"; g.fillRect(4,fy+fh-3,W-12,1); }
+    if(!v&&f===2){ const bx=Math.round(W/2-13); g.fillStyle=pal.line; g.fillRect(bx,fy+fh-3,24,1); g.fillRect(bx,fy+fh-8,24,1); for(let x=bx;x<=bx+23;x+=3)g.fillRect(x,fy+fh-8,1,5); }
+  }
+  g.strokeStyle=pal.line; g.lineWidth=1;
+  for(let i=0;i<4;i++){ let x=R()*W, y=top+R()*(H-top); g.beginPath(); g.moveTo(x,y); for(let s=0;s<5;s++){ x+=(R()-0.5)*8; y+=R()*7; g.lineTo(x,y); } g.stroke(); }
+  g.fillStyle=pal.dark; g.fillRect(0,top-2,W,3);
+  if(!v){ for(let x=0;x<W-2;x+=8){ g.fillStyle=pal.base; g.fillRect(x,top-7,5,6); g.fillStyle=pal.line; g.fillRect(x,top-7,5,1); } }
+  else { g.fillStyle="#6b6b70"; g.fillRect(W-26,0,14,8); g.fillStyle="#44444a"; g.fillRect(W-26,7,14,2); g.fillRect(W-24,8,1,3); g.fillRect(W-15,8,1,3); }
+  return canvasImage(c);
+}
+function proceduralRubble(){
+  const R=seededRand(99), W=48, H=22, c=document.createElement("canvas"); c.width=W; c.height=H; const g=c.getContext("2d");
+  const cols=["#c9a36b","#a8844f","#e0c08a","#8a6a40","#b8966a"];
+  g.fillStyle="#7a5c3a"; g.beginPath(); g.ellipse(W/2,H,W/2-1,H-4,0,Math.PI,0); g.fill();
+  for(let i=0;i<40;i++){
+    const x=3+R()*(W-6), maxH=Math.sqrt(Math.max(0,1-((x-W/2)/(W/2))**2))*(H-3), y=H-1-R()*maxH, s=3+R()*5;
+    g.save(); g.translate(x,y); g.rotate(R()*Math.PI);
+    g.fillStyle=cols[Math.floor(R()*cols.length)]; g.fillRect(-s/2,-s*0.35,s,s*0.7);
+    g.strokeStyle="#3b2a1a"; g.lineWidth=1; g.strokeRect(-s/2,-s*0.35,s,s*0.7); g.restore();
+  }
+  g.strokeStyle="#5a4a44"; for(let i=0;i<4;i++){ const x=8+R()*(W-16); g.beginPath(); g.moveTo(x,H-6); g.lineTo(x+(R()-0.5)*10,H-12-R()*6); g.stroke(); }
+  return canvasImage(c);
+}
 const objImages = {
   tank:loadImg("assets/sprite-tank.png"),
   turret:loadImg("assets/sprite-turret.png"),
@@ -192,7 +241,8 @@ const objImages = {
   qSeg:loadImg("assets/sprite-queen_segment.png"), qCore:loadImg("assets/sprite-queen_core.png"),
   larva:loadImg("assets/sprite-larva.png"), egg:loadImg("assets/sprite-egg.png"),
   wMinigun:loadImg("assets/sprite-weapon_minigun.png"), wFlame:loadImg("assets/sprite-weapon_flamer.png"),
-  wPlasma:loadImg("assets/sprite-weapon_plasma.png"), chute:loadImg("assets/sprite-supply_drop.png")
+  wPlasma:loadImg("assets/sprite-weapon_plasma.png"), chute:loadImg("assets/sprite-supply_drop.png"),
+  bldg1:proceduralBuilding(0), bldg2:proceduralBuilding(1), rubble:proceduralRubble()
 };
 function imgReady(img){ return img && img.complete && img.naturalWidth>0; }
 // Rig de recorte estilo Spine: el torso se dibuja entero y las dos piernas se
@@ -942,10 +992,12 @@ function tileSolid(tx,ty){
 function collideWorld(e,dt){
   const wasGround=e.onGround;
   e.onGround=false;
+  const b0=box(e), c0=b0.x+b0.w/2, feet0=b0.y+b0.h;
   e.x+=e.vx*dt;
   e.y+=e.vy*dt;
-  const b=box(e);
-  const feet=b.y+b.h, gy=groundYAt(b.x+b.w/2);
+  let b=box(e), feet=b.y+b.h, gy=groundYAt(b.x+b.w/2);
+  // pared: si el suelo sube de golpe (escombros o borde de una grieta) solo se pasa saltando
+  if(e.vx&&feet-gy>0.5&&feet-gy>Math.abs(e.vx*dt)*1.5&&feet0-groundYAt(c0)<=1.5){ e.x-=e.vx*dt; e.vx=0; b=box(e); feet=b.y+b.h; gy=groundYAt(b.x+b.w/2); }
   // al bajar una pendiente se mantiene pegado al suelo si no esta saltando
   if(e.vy>=0&&(feet>=gy||(wasGround&&gy-feet<7))){
     e.y+=gy-feet; e.vy=0; e.onGround=true;
@@ -953,12 +1005,23 @@ function collideWorld(e,dt){
 }
 function smooth01(a,b,x){const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);}
 // Colinas suaves (pendiente maxima ~0.21); planas al inicio y en la arena del jefe.
-function groundYAt(x){
-  if(game.lair) return LAIR.ground;
+function baseGroundYAt(x){
   const hills=Math.sin(x*0.0042)*16+Math.sin(x*0.0093+1.3)*9+Math.sin(x*0.021+0.4)*3;
   const flat=smooth01(80,260,x)*(1-smooth01(2360,2500,x));
   return 184-hills*flat;
 }
+function groundYAt(x){
+  if(game.lair) return LAIR.ground;
+  let y=baseGroundYAt(x);
+  const q=game.quake;
+  if(q&&q.fissures){
+    // grietas del terremoto (hundimiento) y montones de escombros (elevacion)
+    for(const f of q.fissures){ const d=Math.abs(x-f.x)/(f.w/2); if(d<1&&f.open>0) y+=f.depth*f.open*(d<0.75?1:(1-d)/0.25); }
+    for(const r of q.rubble){ const d=Math.abs(x-r.x)/(r.w/2); if(d<1) y=Math.min(y,baseGroundYAt(r.x)+2-r.h*r.grow*(d<0.8?1:(1-d)/0.2)); }
+  }
+  return y;
+}
+function inFissure(x){ const q=game.quake; return !!(q&&q.fissures&&q.fissures.some(f=>f.open>0.5&&Math.abs(x-f.x)<f.w*0.3)); }
 function dist2(a,b){const dx=a.x-b.x,dy=a.y-b.y;return dx*dx+dy*dy;}
 
 /* ============================================================
@@ -1610,6 +1673,7 @@ class Robot extends Mech{
     } else this.vx=0;
     this.vy+=CONFIG.PLAYER.gravity*dt; collideWorld(this,dt);
     this.anim+=Math.abs(this.vx)*0.12*dt;
+    if(this.onGround&&inFissure(this.x+14))this.destroy();
   }
   draw(cam){
     if(!imgReady(enemyRobotImg))return;
@@ -2107,14 +2171,36 @@ class SandQueen extends Entity{
 /* ============================================================
    TERREMOTO A MITAD DEL NIVEL: robots salen de la tierra y cae un arma especial
    ============================================================ */
+const QUAKE_BLD_X=1492;
+function makeCityBuildings(){ return QUAKE_BLDS.map((d,i)=>({x:QUAKE_BLD_X+d.dx,img:d.img,h:d.h,flip:!!d.flip,fallen:0,bands:4,tilt:0,nextT:0.7+i*0.8})); }
+const QUAKE_BLDS=[{dx:64,img:"bldg1",h:118},{dx:196,img:"bldg2",h:138},{dx:330,img:"bldg1",h:108,flip:true}];
 const QUAKE={x:1600, waves:[["r","r","r"],["r","d","r"],["r","r","d","r"]]};
 function startQuake(){
-  game.quake={t:0,wave:0,waveT:1.6,spawned:[],cracks:[],done:false,doneT:0,shakeT:2.5,crate:false,camX:clamp(player.x-110,0,WORLD_W-CONFIG.W)};
+  const camX=clamp(player.x-110,0,WORLD_W-CONFIG.W);
+  game.quake={t:0,wave:0,waveT:1.6,spawned:[],cracks:[],done:false,doneT:0,shakeT:2.5,crate:false,camX,
+    fissures:[],rubble:[],fissT:1.2,warned:false,
+    buildings:game.cityBlds||[]};
   SFX.quake(); SFX.boss();
 }
 function updateQuake(dt){
   const q=game.quake; if(!q)return;
-  q.t+=dt; if(q.done)return;
+  q.t+=dt;
+  for(const f of q.fissures){
+    f.open=Math.min(1,f.open+dt*1.2);
+    if(f.open<1&&Math.random()<dt*20)particles.push(new Particle(f.x+rnd(-f.w/2,f.w/2),baseGroundYAt(f.x),rnd(-20,20),rnd(-60,-20),rnd(.4,.8),Math.random()<.5?"rock":"smoke"));
+  }
+  for(const r of q.rubble)r.grow=Math.min(1,r.grow+dt*4);
+  if(q.done)return;
+  for(const b of q.buildings){
+    b.tilt=Math.sin(q.t*9+b.x)*(q.shakeT>0?0.02:0.006);
+    if(b.fallen<2&&q.t>=b.nextT){
+      b.fallen++; b.nextT=q.t+rnd(1.6,2.6); entities.push(new BuildingChunk(b)); SFX.stomp();
+      const y=baseGroundYAt(b.x)+6-b.h*(1-(b.fallen-1)/b.bands);
+      for(let i=0;i<10;i++)particles.push(new Particle(b.x+rnd(-20,20),y+rnd(-4,4),rnd(-40,40),rnd(-30,10),rnd(.6,1.1),Math.random()<.6?"smoke":"rock"));
+    }
+  }
+  q.fissT-=dt;
+  if(q.fissT<=0&&q.fissures.length<3){ q.fissT=rnd(2.5,3.5); openFissure(q); }
   q.shakeT-=dt; shake(q.shakeT>0?5:1.2,0.08);
   if(Math.random()<dt*(q.shakeT>0?14:3))particles.push(new Particle(q.camX+rnd(0,CONFIG.W),rnd(-10,30),rnd(-10,10),rnd(20,60),rnd(.8,1.4),"rock"));
   if(!q.crate&&q.t>1.0){ q.crate=true; entities.push(new SupplyDrop(clamp(player.x+70,q.camX+40,q.camX+CONFIG.W-40))); }
@@ -2138,8 +2224,87 @@ function updateQuake(dt){
     entities.push(new ScorePopup(player.x+14,player.y-20,"+5000"));
   }
 }
+function openFissure(q){
+  const px=player.x+14;
+  for(let tries=0;tries<12;tries++){
+    const x=q.camX+40+Math.random()*(CONFIG.W-80);
+    if(Math.abs(x-px)<50||q.fissures.some(f=>Math.abs(f.x-x)<60)||q.rubble.some(r=>Math.abs(r.x-x)<40)||q.cracks.some(c=>Math.abs(c.x-x)<24))continue;
+    q.fissures.push({x,w:rnd(22,30),depth:30,open:0}); SFX.quake(); shake(5,.4);
+    if(!q.warned){ q.warned=true; toast("CUIDADO CON LAS GRIETAS"); }
+    return;
+  }
+}
+class BuildingChunk extends Entity{
+  // piso de edificio que se desprende, gira y al caer deja un monton de escombros
+  constructor(b){
+    super(b.x,0); this.b=b; this.band=b.fallen-1;
+    const base=baseGroundYAt(b.x)+6, bh=b.h/b.bands;
+    this.y=base-b.h+(this.band+0.5)*bh; this.vx=rnd(-45,45); this.vy=-rnd(10,40); this.rot=0; this.spin=rnd(-2.5,2.5); this.hb={x:-12,y:-8,w:24,h:16};
+  }
+  update(dt){
+    this.vy+=520*dt; this.x+=this.vx*dt; this.y+=this.vy*dt; this.rot+=this.spin*dt;
+    const g=groundYAt(this.x)-6;
+    if(this.y<g)return;
+    this.dead=true; shake(4,.2); SFX.boom();
+    for(let i=0;i<14;i++)particles.push(new Particle(this.x+rnd(-14,14),g+4,rnd(-70,70),rnd(-120,-30),rnd(.4,.9),i%2?"rock":"smoke"));
+    const pb=box(player);
+    if(!player.inTank&&Math.abs(pb.x+pb.w/2-this.x)<20&&pb.y+pb.h>g-30&&!shieldBlocks(this.x,CONFIG.SHIELD.blastCost))player.die();
+    const q=game.quake;
+    if(q&&!q.fissures.some(f=>Math.abs(f.x-this.x)<f.w/2+14)&&!q.rubble.some(r=>Math.abs(r.x-this.x)<30))
+      q.rubble.push({x:this.x,w:rnd(28,38),h:rnd(14,19),grow:0});
+  }
+  draw(cam){
+    const b=this.b, img=objImages[b.img]; if(!imgReady(img))return;
+    const bx=alphaBox(img), k=b.h/(bx.y1-bx.y0), bandH=(bx.y1-bx.y0)/b.bands, sy=bx.y0+this.band*bandH, w=(bx.x1-bx.x0)*k;
+    const g=groundYAt(this.x);
+    ctx.save(); ctx.globalAlpha=clamp(0.5-(g-this.y)/300,0.1,0.5); ctx.fillStyle="#000";
+    ctx.beginPath(); ctx.ellipse(this.x-cam.x,g,w*0.4,3,0,0,Math.PI*2); ctx.fill(); ctx.restore();
+    ctx.save(); ctx.translate(this.x-cam.x,this.y); ctx.rotate(this.rot); if(b.flip)ctx.scale(-1,1); ctx.imageSmoothingEnabled=true;
+    ctx.drawImage(img,bx.x0,sy,bx.x1-bx.x0,bandH+1,-w/2,-bandH*k/2,w,bandH*k+1);
+    ctx.restore();
+  }
+}
+function drawQuakeBuildings(){
+  const q=game.quake, list=q&&q.buildings&&q.buildings.length?q.buildings:(game.cityBlds||[]);
+  for(const b of list){
+    const img=objImages[b.img]; if(!imgReady(img))continue;
+    const sx=b.x-cam.x; if(sx<-100||sx>CONFIG.W+100)continue;
+    const bx=alphaBox(img), k=b.h/(bx.y1-bx.y0), w=(bx.x1-bx.x0)*k, base=baseGroundYAt(b.x)+6, bandH=(bx.y1-bx.y0)/b.bands, top=bx.y0+b.fallen*bandH, hh=(bx.y1-top)*k;
+    ctx.save(); ctx.translate(sx,base); ctx.rotate(b.tilt); if(b.flip)ctx.scale(-1,1); ctx.imageSmoothingEnabled=true;
+    if(b.fallen)ctx.filter="brightness(0.85) saturate(0.85)";
+    ctx.drawImage(img,bx.x0,top,bx.x1-bx.x0,bx.y1-top,-w/2,-hh,w,hh);
+    ctx.filter="none";
+    if(b.fallen){ ctx.fillStyle="#5a4632"; for(let i=0;i<7;i++){ const hx=-w/2+i*w/6, th=3+((i*37)%5); ctx.fillRect(Math.round(hx-2),Math.round(-hh-th+3),5,th); } }
+    ctx.restore();
+    if(b.fallen&&Math.random()<0.15)particles.push(new Particle(b.x+rnd(-w/3,w/3),base-hh,rnd(-5,5),rnd(-20,-8),.9,"smoke"));
+  }
+}
 function drawQuakeFx(){
   const q=game.quake; if(!q)return;
+  for(const f of q.fissures||[]){
+    const x=f.x-cam.x; if(x<-40||x>CONFIG.W+40||f.open<=0)continue;
+    const hw=f.w/2;
+    ctx.save();
+    // interior oscuro de la grieta entre la superficie original y el hundimiento
+    ctx.fillStyle="#1a0a05"; ctx.beginPath();
+    for(let wx=-hw;wx<=hw;wx+=2) ctx.lineTo(x+wx,baseGroundYAt(f.x+wx));
+    for(let wx=hw;wx>=-hw;wx-=2) ctx.lineTo(x+wx,groundYAt(f.x+wx)+3);
+    ctx.closePath(); ctx.fill();
+    // brillo de magma en el fondo
+    const by=baseGroundYAt(f.x)+f.depth*f.open, pulse=0.6+0.4*Math.sin(performance.now()/180+f.x);
+    ctx.globalCompositeOperation="lighter";
+    const g=ctx.createRadialGradient(x,by,1,x,by,f.w*0.9);
+    g.addColorStop(0,`rgba(255,150,40,${(0.75*f.open*pulse).toFixed(3)})`); g.addColorStop(1,"rgba(255,60,10,0)");
+    ctx.fillStyle=g; ctx.fillRect(x-f.w,by-f.w,f.w*2,f.w*2);
+    ctx.fillStyle=`rgba(255,200,90,${(0.8*f.open).toFixed(2)})`; ctx.fillRect(Math.round(x-hw*0.6),Math.round(by),Math.round(hw*1.2),2);
+    ctx.restore();
+  }
+  for(const r of q.rubble||[]){
+    const x=r.x-cam.x; if(x<-40||x>CONFIG.W+40)continue;
+    const base=baseGroundYAt(r.x)+3, h=r.h*r.grow, img=objImages.rubble;
+    if(imgReady(img)){ const bx=alphaBox(img), w=r.w*1.25, hh=Math.max(1,h*1.4); ctx.save(); ctx.imageSmoothingEnabled=true; ctx.drawImage(img,bx.x0,bx.y0,bx.x1-bx.x0,bx.y1-bx.y0,x-w/2,base-hh,w,hh); ctx.restore(); }
+    else { ctx.fillStyle="#7a6048"; ctx.beginPath(); ctx.ellipse(x,base,r.w/2,Math.max(1,h),0,Math.PI,0); ctx.fill(); }
+  }
   for(const c of q.cracks){
     const x=c.x-cam.x; if(x<-30||x>CONFIG.W+30)continue;
     const gy=groundYAt(c.x), a=Math.min(1,(q.t-c.t)*3), w=18*a;
@@ -2357,6 +2522,13 @@ class Player extends Entity{
     this.vy=clamp(this.vy+CONFIG.PLAYER.gravity*dt,-999,CONFIG.PLAYER.maxFall);
     collideWorld(this,dt);
     this.x=clamp(this.x,0,game.lair?LAIR.maxX:WORLD_W-28);
+    if(this.onGround&&inFissure(this.x+14)){
+      // caer en una grieta quema y te lanza hacia fuera
+      const f=game.quake.fissures.find(q=>Math.abs(this.x+14-q.x)<q.w*0.3);
+      this.die(); this.vy=-320; this.vx=(this.x+14<f.x?-1:1)*140; this.onGround=false;
+      addLight(f.x,groundYAt(f.x),40,"255,120,40",.2);
+      for(let i=0;i<8;i++)particles.push(new Particle(f.x+rnd(-6,6),groundYAt(f.x),rnd(-40,40),rnd(-140,-60),rnd(.3,.6)));
+    }
     this.anim+=Math.abs(this.vx)*dt*.09;this.fireCd-=dt;this.knifeCd-=dt;this.knifeT-=dt;this.invuln-=dt;this.throwT-=dt;
     if(this.onGround&&Math.abs(this.vx)>8&&!this.crouch){
       const sf=Math.floor(this.anim)%4;
@@ -2715,6 +2887,7 @@ function buildLevel(){
   for(const x of SPAWNS.drones)entities.push(new Drone(x,groundYAt(x)-78));
   for(const x of SPAWNS.heavies)entities.push(new HeavyBot(x));
   boss=null;
+  game.cityBlds=makeCityBuildings();
 }
 
 /* ============================================================
@@ -2817,7 +2990,7 @@ function applySave(s){
   const x=clamp(s.x|0,48,WORLD_W-400);
   game.checkpoint=x; player.x=x; player.y=groundYAt(x+14)-40; cam.x=clamp(x-110,0,WORLD_W-CONFIG.W);
   for(const e of entities){ if(e instanceof Buddy)e.x=x-20; else if(e.x<x-180&&!(e instanceof Tank))e.dead=true; }
-  if(s.quakeDone)game.quake={t:99,doneT:0,done:true,wave:QUAKE.waves.length,spawned:[],cracks:[],camX:0,shakeT:0,crate:true};
+  if(s.quakeDone){ for(const b of game.cityBlds||[])b.fallen=2; game.quake={t:99,doneT:0,done:true,wave:QUAKE.waves.length,spawned:[],cracks:[],camX:0,shakeT:0,crate:true,fissures:[],rubble:[],buildings:game.cityBlds||[]}; }
 }
 function finishRun(won){
   updateProfile(p=>{ p.best=Math.max(p.best||0,game.score); p.plays=(p.plays||0)+1; if(won){ p.wins=(p.wins||0)+1; p.save=null; } });
@@ -3357,7 +3530,7 @@ function render(){
   ctx.save();
   ctx.translate(Math.round(cam.sx),Math.round(cam.sy));
   if(game.lair&&game.state!=="TITLE"){ drawLairBg(); drawGround(); }
-  else { drawSky();drawMidground();drawFarPalms();drawForeground();drawQuakeFx(); }
+  else { drawSky();drawMidground();drawFarPalms();drawQuakeBuildings();drawForeground();drawQuakeFx(); }
   for(const m of mortars)m.draw(cam);
   // Orden simple por y
   const renderList=entities.slice().sort((a,b)=>a.y-b.y);
