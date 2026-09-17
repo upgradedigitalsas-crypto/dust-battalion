@@ -113,6 +113,10 @@ const heroImages = [
    superThrow:loadImg("assets/sprite-kid_throw_super.png")}
 ];
 const enemyRifleImg = loadImg("assets/sprite-enemy_rifle.png",{legtop:143,torsobot:167,pivx:110,pivy:154,split:110,bot:276,thigh:0.45,knee:1.05});
+["hero","hero2","hero3","kid"].forEach((n,i)=>{
+  heroImages[i].front=loadImg(`assets/sprite-${n}_front.png`);
+  const c=loadImg(`assets/sprite-${n}_cheer.png`); c.padTop=40; heroImages[i].cheer=c;
+});
 for(const n of ["superRun","superIdle","superThrow"])heroImages[3][n].padTop=40;
 heroImages[3].superRun.rig=shiftRig(heroImages[3].run.rig,40);
 const enemyRobotImg = loadImg("assets/sprite-enemy_robot.png",{legtop:172,torsobot:192,pivx:128,pivy:180,split:128,bot:291,thigh:0.38,knee:0.8});
@@ -1057,21 +1061,21 @@ class ScorePopup extends Entity{
 }
 class Boomerang extends Entity{
   // sale disparado, frena, y vuelve a la mano del lanzador atravesando enemigos
-  constructor(owner,x,y,nx,ny,big=false){
+  constructor(owner,x,y,nx,ny,big=false,power=0){
     super(x,y); this.owner=owner; this.mode=big==="super"?"super":big?"giant":null; this.big=!!big; this.hb=big?{x:-13,y:-9,w:26,h:18}:{x:-7,y:-5,w:14,h:10};
-    const spd=this.mode==="super"?1.3:1; this.vx=nx*250*spd; this.vy=ny*225*spd; this.t=0; this.spin=0; this.returning=false;
+    this.power=power; const spd=(this.mode==="super"?1.3:1)*(1+0.45*power); this.vx=nx*250*spd; this.vy=ny*225*spd; this.t=0; this.spin=0; this.returning=false;
     this.hitSet=new Set(); this.trail=[];
   }
   update(dt){
     this.t+=dt; this.spin+=dt*22;
     if(!this.returning){
-      const f=Math.pow(0.12,dt); this.vx*=f; this.vy*=f;
-      if(this.t>0.42){ this.returning=true; this.hitSet.clear(); }
+      const f=Math.pow(0.12+0.6*this.power,dt); this.vx*=f; this.vy*=f;
+      if(this.t>0.42*(1+1.3*this.power)){ this.returning=true; this.hitSet.clear(); }
     } else {
       const ox=this.owner.x+14, oy=this.owner.y+12, dx=ox-this.x, dy=oy-this.y, d=Math.hypot(dx,dy)||1;
       const sp=Math.min(330,120+this.t*260), k=Math.min(1,dt*8);
       this.vx+=(dx/d*sp-this.vx)*k; this.vy+=(dy/d*sp-this.vy)*k;
-      if(d<14||this.t>3){ this.dead=true; return; }
+      if(d<14||this.t>3+2*this.power){ this.dead=true; return; }
     }
     this.x+=this.vx*dt; this.y+=this.vy*dt;
     this.trail.push([this.x,this.y]); if(this.trail.length>7)this.trail.shift();
@@ -1079,7 +1083,7 @@ class Boomerang extends Entity{
     for(const e of entities){
       if(e.dead||this.hitSet.has(e)||!aabb(b,box(e)))continue;
       if(isHostile(e)){
-        this.hitSet.add(e); e.hurt(this.mode==="super"?6:this.big?4:2,"shot",sign(this.vx)||1); impactPuff(this.x,this.y);
+        this.hitSet.add(e); e.hurt((this.mode==="super"?6:this.big?4:2)+(this.power>=1?2:0),"shot",sign(this.vx)||1); impactPuff(this.x,this.y);
       } else if(e instanceof Crate){ this.hitSet.add(e); e.hurt(2); }
       else if(e instanceof Hostage&&!e.freed){ e.free(); }
     }
@@ -2256,7 +2260,7 @@ class Player extends Entity{
     if(heroImages[this.charIndex].weapon==="boomerang"&&hit("s","z")&&!this.shieldOn){
       // doble toque de S: rafaga de boomerangs en 360 grados
       if(game.runTime-this.lastTap<CONFIG.BURST.tap&&this.burstCd<=0){
-        this.burstCd=CONFIG.BURST.cd; this.lastTap=-9; this.throwT=0.3; this.fireCd=0.3;
+        this.burstCd=CONFIG.BURST.cd; this.lastTap=-9; this.throwT=0.3; this.fireCd=0.3; this.skipRelease=true;
         const mode=this.superT>0?"super":this.power?.kind==="giant"?"giant":false, n=CONFIG.BURST.count;
         for(let i=0;i<n;i++){ const a=i/n*Math.PI*2-Math.PI/2; entities.push(new Boomerang(this,this.x+14,this.y+12,Math.cos(a),Math.sin(a),mode)); }
         SFX.boomerang(); SFX.charge(); flashScreen(.25); shake(2,.12);
@@ -2283,6 +2287,19 @@ class Player extends Entity{
     }
 
     const aim=aimVector(this.facing,L,R,down("d")||gp?.aimUp,D&&!this.onGround);
+    if(heroImages[this.charIndex].weapon==="boomerang"){
+      // mantener S carga la potencia; al soltar se lanza el boomerang (mas lejos cuanto mas carga)
+      const held=(down("s","z")||gp?.fire)&&!this.crouch&&!this.shieldOn;
+      if(held){
+        const prev=this.charge??-1; this.charge=prev<0?0:prev+dt;
+        const p=clamp((this.charge-0.15)/0.85,0,1), step=Math.floor(p*5);
+        if(p>0&&step!==this.chargeStep){ this.chargeStep=step; tone(320+step*110,0.05,"square",0.035,40); }
+      } else if((this.charge??-1)>=0){
+        if(this.skipRelease)this.skipRelease=false;
+        else if(!this.crouch&&!this.shieldOn)this.throwBoomerang(aim,clamp((this.charge-0.15)/0.85,0,1));
+        this.charge=-1; this.chargeStep=-1;
+      }
+    }
     if((down("s","z")||gp?.fire)&&this.fireCd<=0&&!this.crouch&&!this.shieldOn){
       const pw=this.power;
       if(pw&&pw.kind!=="giant"&&pw.ammo>0){
@@ -2303,12 +2320,7 @@ class Player extends Entity{
         }
         if(pw.ammo<=0)this.power=null;
       } else if(heroImages[this.charIndex].weapon==="boomerang"){
-        // el chico no usa armas de fuego: lanza su boomerang laser (maximo 2 en vuelo)
-        if(entities.filter(e=>e instanceof Boomerang&&!e.dead).length<(this.rapidT>0||this.superT>0||this.power?.kind==="giant"?3:2)){
-          this.fireCd=this.superT>0?0.18:0.28; this.throwT=0.22; SFX.boomerang();
-          entities.push(new Boomerang(this,this.x+14+aim.x*14,this.y+12+aim.y*8,aim.x,aim.y,this.superT>0?"super":this.power?.kind==="giant"?"giant":false));
-          addLight(this.x+14+aim.x*16,this.y+12,22,"120,220,255",0.08);
-        }
+        // Juan Jose lanza al soltar S (ver carga mas arriba)
       } else if(this.rocketAmmo>0){
         this.fireCd=CONFIG.ROCKET.fireRate;this.rocketAmmo--;SFX.rocket();
         const rx=this.x+14+aim.x*14, ry=this.y+11+aim.y*8;
@@ -2344,6 +2356,15 @@ class Player extends Entity{
     }
     if(this.y>CONFIG.H+45)this.die();
   }
+  throwBoomerang(aim,power){
+    const limit=this.rapidT>0||this.superT>0||this.power?.kind==="giant"?3:2;
+    if(entities.filter(e=>e instanceof Boomerang&&!e.dead).length>=limit)return;
+    const mode=this.superT>0?"super":this.power?.kind==="giant"?"giant":false;
+    this.fireCd=this.superT>0?0.18:0.28; this.throwT=0.22; SFX.boomerang();
+    entities.push(new Boomerang(this,this.x+14+aim.x*14,this.y+12+aim.y*8,aim.x,aim.y,mode,power));
+    addLight(this.x+14+aim.x*16,this.y+12,22+power*30,mode==="super"?"255,80,50":"120,220,255",0.08+power*0.1);
+    if(power>=1){ flashScreen(.15); shake(1.5,.08); }
+  }
   draw(cam){
     if(this.inTank)return;
     if(this.invuln>0&&Math.floor(this.invuln*14)%2===0)return;
@@ -2374,6 +2395,18 @@ class Player extends Entity{
       ctx.strokeStyle=`rgba(210,248,255,${(a*0.5).toFixed(3)})`; ctx.lineWidth=1;
       for(let i=-2;i<=2;i++){ctx.beginPath();ctx.arc(fx+this.facing*2,fy+i*7,3,0,Math.PI*2);ctx.stroke();}
       ctx.restore();
+    }
+    if(this.charge>0.15){
+      const p=clamp((this.charge-0.15)/0.85,0,1), bx=Math.round(this.x-cam.x+2), by=Math.round(this.y-14);
+      ctx.fillStyle="rgba(0,0,0,.65)"; ctx.fillRect(bx-1,by-1,26,5);
+      ctx.fillStyle=p>=1?(blinkOn()?"#fff07a":"#ff5a3a"):`rgb(${Math.round(120+135*p)},${Math.round(220-130*p)},${Math.round(255-205*p)})`;
+      ctx.fillRect(bx,by,Math.round(24*p),3);
+      if(p>=1)textPx("MAX",bx+12,by-7,1,PAL["K"],"center");
+      const hx=this.x-cam.x+14+this.facing*10, hy=this.y+14;
+      ctx.save(); ctx.globalCompositeOperation="lighter";
+      const g=ctx.createRadialGradient(hx,hy,0,hx,hy,4+p*8);
+      g.addColorStop(0,`rgba(${this.superT>0?"255,120,80":"160,235,255"},${(0.5+0.4*p).toFixed(2)})`); g.addColorStop(1,"rgba(120,220,255,0)");
+      ctx.fillStyle=g; ctx.fillRect(hx-12,hy-12,24,24); ctx.restore();
     }
     if(this.shield<100){
       const bx=Math.round(this.x-cam.x+2), by=Math.round(this.y-8);
@@ -2655,9 +2688,10 @@ function update(dt){
     clearPressed();return;
   }
   if(game.state==="CHARSELECT"){
+    if(game.cheer){ game.cheer.t+=dt; if(game.cheer.t>=1.5){ game.cheer=null; startGame(true); } clearPressed(); return; }
     if(hit("arrowleft"))game.charIndex=(game.charIndex+heroImages.length-1)%heroImages.length;
     if(hit("arrowright"))game.charIndex=(game.charIndex+1)%heroImages.length;
-    if(hit("s","z","enter"))startGame(true);
+    if(hit("s","z","enter")){ game.cheer={t:0}; SFX.rescue(); SFX.powerup(); }
     if(hit("escape","x"))game.state="TITLE";
     clearPressed();return;
   }
@@ -3120,6 +3154,7 @@ function drawTitle(){
     "JUAN JOSE LANZA SU BOOMERANG CON S",
     "JUAN JOSE VENCE 3 ENEMIGOS Y ACTIVA SU MODO PODER",
     "JUAN JOSE PULSA S DOS VECES PARA UNA RAFAGA 360",
+    "MANTEN S CON JUAN JOSE PARA LANZAR MAS LEJOS",
     "EL ESCUDO SOLO PROTEGE POR DELANTE"
   ];
   const tip=tips[Math.floor(performance.now()/3200)%tips.length];
@@ -3145,6 +3180,16 @@ function keyCap(x,y,label){
   } else textPx(label,x+w/2,y+2,1,PAL["1"],"center");
   return w;
 }
+function drawConfetti(cx,cy,t){
+  const cols=[PAL["K"],PAL["H"],PAL["W"],PAL["J"],PAL["B"]];
+  ctx.save(); ctx.globalAlpha=clamp(1.5-t,0,1);
+  for(let i=0;i<26;i++){
+    const a=hash01(i*3.7)*Math.PI*2, v=40+hash01(i*9.1)*70;
+    const x=cx+Math.cos(a)*v*t, y=cy+Math.sin(a)*v*t*0.8-30*t+70*t*t;
+    ctx.fillStyle=cols[i%cols.length]; ctx.fillRect(Math.round(x),Math.round(y),(i%3)?2:3,(i%2)?2:1);
+  }
+  ctx.restore();
+}
 function drawCharSelect(){
   ctx.fillStyle=PAL["0"];ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
   hazardStripes(0,0,CONFIG.W,6,1);
@@ -3163,7 +3208,22 @@ function drawCharSelect(){
     drawPanel(bx,boxY,boxW,boxH,accent);
     cornerBracket(bx-(sel?2:0),boxY-(sel?2:0),boxW+(sel?4:0),boxH+(sel?4:0),accent,sel?7:4);
     const hc=heroImages[i];
-    if(hc&&imgReady(hc.run))drawCharImg(hc.run,bx+boxW/2,boxY+116,80,false,sel?performance.now()/1000*5.5:0,sel);
+    const cheer=sel&&game.cheer;
+    if(hc&&hc.front&&imgReady(hc.front)){
+      const t=performance.now()/1000, cx=bx+boxW/2, fy=boxY+120;
+      let img=hc.front, hop=0, sc=1, rot=0;
+      if(cheer){
+        const c=game.cheer.t;
+        if(c>0.12&&hc.cheer&&imgReady(hc.cheer))img=hc.cheer;
+        hop=Math.abs(Math.sin(c*7))*10*Math.max(0,1-c/1.4); rot=Math.sin(c*14)*0.04*Math.max(0,1-c/1.4); sc=1+0.06*Math.max(0,1-c*3);
+      } else if(sel) sc=1+Math.sin(t*3)*0.012;
+      ctx.save(); ctx.globalAlpha=0.35; ctx.fillStyle="#000"; ctx.beginPath(); ctx.ellipse(cx,fy,20-hop*0.6,3,0,0,Math.PI*2); ctx.fill(); ctx.restore();
+      ctx.save(); ctx.translate(cx,fy-hop); ctx.rotate(rot); ctx.scale(sc,sc);
+      if(!sel)ctx.filter="brightness(0.55) saturate(0.7)";
+      drawCharImg(img,0,0,98,false);
+      ctx.restore();
+      if(cheer){ drawConfetti(cx,boxY+44,game.cheer.t); if(blinkOn())textPx("LISTO",cx,boxY+6,1,PAL["K"],"center"); }
+    } else if(hc&&imgReady(hc.run))drawCharImg(hc.run,bx+boxW/2,boxY+116,80,false,sel?performance.now()/1000*5.5:0,sel);
     textPx(hc?hc.name:"?",bx+boxW/2,boxY+boxH-13,1,sel?PAL["K"]:PAL["7"],"center");
     if(sel){
       const arrowY=boxY+boxH/2;
