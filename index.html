@@ -2996,11 +2996,19 @@ function finishRun(won){
   updateProfile(p=>{ p.best=Math.max(p.best||0,game.score); p.plays=(p.plays||0)+1; if(won){ p.wins=(p.wins||0)+1; p.save=null; } });
 }
 const $pf=id=>document.getElementById(id);
+function initLastProfile(){ const l=lastProfile(); if(l)rememberProfile(l.user,l.p); }
 function mk(tag,cls,text){ const e=document.createElement(tag); if(cls)e.className=cls; if(text!=null)e.textContent=text; return e; }
-function openProfiles(){
+function openProfiles(focusUser){
   game.state="PROFILE"; clearPressed(); for(const k in keys)keys[k]=false;
-  $pf("profiles").hidden=false; showProfileList();
+  $pf("profiles").hidden=false;
+  const s=loadStore();
+  if(focusUser&&s.profiles[focusUser])showProfileDetail(focusUser);
+  else if(!Object.keys(s.profiles).length)showProfileForm();
+  else showProfileList();
 }
+// el perfil queda recordado en este navegador: en la proxima visita no se vuelve a pedir
+function rememberProfile(u,p){ game.profile=u; game.profileName=p.name; }
+function lastProfile(){ const s=loadStore(); return s.last&&s.profiles[s.last]?{user:s.last,p:s.profiles[s.last]}:null; }
 function showProfileList(){
   const s=loadStore(), list=$pf("pf-list"); list.replaceChildren();
   list.hidden=false; $pf("pf-form").hidden=true; $pf("pf-detail").hidden=true; $pf("pf-title").textContent="Perfiles";
@@ -3047,19 +3055,20 @@ $pf("pf-form").onsubmit=e=>{
 };
 function startFromProfile(u,cont){
   const s=loadStore(), p=s.profiles[u]; if(!p)return showProfileList();
-  game.profile=u; p.lastPlayed=Date.now(); s.last=u; saveStore(s);
-  $pf("profiles").hidden=true; clearPressed(); for(const k in keys)keys[k]=false;
+  rememberProfile(u,p); p.lastPlayed=Date.now(); s.last=u; saveStore(s);
+  $pf("profiles").hidden=true; clearPressed(); for(const k in keys)keys[k]=false; game.inputLock=0.4;
   if(cont&&p.save){
     game.pendingSave=p.save; game.charIndex=clamp(p.save.charIndex|0,0,heroImages.length-1);
     game.state="LOADING"; game.loadT=0; loader.show(); playClip("loading",0.85);
   } else { game.pendingSave=null; game.charIndex=clamp(p.hero|0,0,heroImages.length-1); game.state="CHARSELECT"; }
 }
+initLastProfile();
 function profileKey(e){
   const root=$pf("profiles"), inInput=e.target&&e.target.tagName==="INPUT";
   if(e.key==="Escape"){
     e.preventDefault();
     if(!$pf("pf-form").hidden||!$pf("pf-detail").hidden)showProfileList();
-    else { root.hidden=true; game.state="TITLE"; }
+    else { root.hidden=true; game.state="TITLE"; clearPressed(); game.inputLock=0.3; }
     return;
   }
   if((e.key==="ArrowDown"||e.key==="ArrowUp")&&!inInput){
@@ -3156,11 +3165,23 @@ function update(dt){
   musicTick(dt);
   if(game.state!=="PLAY"||game.paused)gatlingStop();
   if(game.toast){ game.toast.t-=dt; if(game.toast.t<=0)game.toast=null; }
+  if(game.inputLock>0){ game.inputLock-=dt; clearPressed(); }
   loopClip("ambience",!game.paused,game.state==="PLAY"?(game.lair?0.12:0.2):0.08);
   updateWind(dt);
-  if(hit("p")&&game.state==="PLAY")game.paused=!game.paused;
+  if((hit("p")||hit("escape"))&&game.state==="PLAY"){ game.paused=!game.paused; if(game.paused)game.pauseMenu={i:0}; }
+  // en la pantalla de perfiles (formulario HTML) el juego no simula nada
+  if(game.state==="PROFILE"){ clearPressed(); return; }
   if(game.state==="TITLE"){
-    if(hit("s","z","enter"))openProfiles();
+    if(hit("tab"))openProfiles();
+    if(hit("s","z","enter")){
+      const l=lastProfile();
+      if(!l)openProfiles();
+      else {
+        rememberProfile(l.user,l.p);
+        if(l.p.save)openProfiles(l.user);
+        else { game.pendingSave=null; game.charIndex=clamp(l.p.hero|0,0,heroImages.length-1); game.state="CHARSELECT"; game.inputLock=0.25; }
+      }
+    }
     clearPressed();return;
   }
   if(game.state==="CHARSELECT"){
@@ -3197,8 +3218,20 @@ function update(dt){
     if(hit("s","z","enter"))game.state="TITLE";
     clearPressed();return;
   }
-  if(game.paused){ if(hit("g"))saveGame(true); clearPressed(); return; }
+  if(game.paused){
+    const m=game.pauseMenu||(game.pauseMenu={i:0});
+    if(hit("arrowup"))m.i=(m.i+2)%3;
+    if(hit("arrowdown"))m.i=(m.i+1)%3;
+    if(hit("g"))saveGame(true);
+    if(hit("s","z","enter")){
+      if(m.i===0)game.paused=false;
+      else if(m.i===1)saveGame(true);
+      else { game.paused=false; gatlingStop(); game.state="TITLE"; game.inputLock=0.3; }
+    }
+    clearPressed(); return;
+  }
 
+  if(!player){ clearPressed(); return; }
   game.runTime+=dt;
   updateLights(dt);
   player.update(dt);
@@ -3554,12 +3587,20 @@ function render(){
   if(game.state==="GAMEOVER")drawGameOver();
   if(game.state==="RESULTS")drawResults();
   if(game.paused){
-    ctx.fillStyle="rgba(0,0,0,.55)";ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
-    drawPanel(140,90,104,34,PAL["I"]);
-    cornerBracket(140,90,104,34,PAL["6"],6);
-    textPx("PAUSA",CONFIG.W/2+1,105,3,PAL["G"],"center");
-    textPx("PAUSA",CONFIG.W/2,104,3,PAL["K"],"center");
-    if(game.profile){ keyCap(CONFIG.W/2-46,134,"G"); textPx("GUARDAR PARTIDA",CONFIG.W/2-30,137,1,PAL["7"]); }
+    ctx.fillStyle="rgba(0,0,0,.62)";ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
+    const w=156,h=92,x=Math.round((CONFIG.W-w)/2),y=58;
+    drawPanel(x,y,w,h,PAL["I"]);
+    cornerBracket(x,y,w,h,PAL["6"],6);
+    textPx("PAUSA",CONFIG.W/2+1,y+9,3,PAL["G"],"center");
+    textPx("PAUSA",CONFIG.W/2,y+8,3,PAL["K"],"center");
+    const m=game.pauseMenu||{i:0};
+    ["SEGUIR JUGANDO","GUARDAR PARTIDA","SALIR AL MENU"].forEach((o,i)=>{
+      const oy=y+32+i*14, sel=i===m.i;
+      if(sel){ ctx.fillStyle=PAL["2"]; ctx.fillRect(x+8,oy-3,w-16,11); textPx(">",x+12,oy,1,PAL["K"]); }
+      textPx(o,CONFIG.W/2,oy,1,sel?PAL["K"]:PAL["7"],"center");
+    });
+    textPx(game.profile?("PERFIL "+game.profileName):"SIN PERFIL",CONFIG.W/2,y+h-11,1,PAL["M"],"center");
+    if(blinkOn())textPx("FLECHAS ELEGIR   S ACEPTAR   ESC SEGUIR",CONFIG.W/2,y+h+6,1,PAL["7"],"center");
   }
   crtOverlay();
 }
@@ -3642,7 +3683,8 @@ function drawTitle(){
   textPx("DUST",CONFIG.W/2,22,5,PAL["K"],"center");
   textPx("BATTALION",CONFIG.W/2+1,53,3,PAL["G"],"center");
   textPx("BATTALION",CONFIG.W/2,52,3,PAL["7"],"center");
-  if(blinkOn())textPx("PULSA S O ENTER PARA EMPEZAR",CONFIG.W/2,76,1,PAL["J"],"center");
+  if(blinkOn())textPx("PULSA S O ENTER PARA EMPEZAR",CONFIG.W/2,70,1,PAL["J"],"center");
+  textPx(game.profile?("PERFIL "+game.profileName+"   TAB CAMBIAR"):"CREA TU PERFIL AL EMPEZAR",CONFIG.W/2,80,1,PAL["W"],"center");
 
   const px=18, py=88, pw=CONFIG.W-36, ph=122;
   drawPanel(px,py,pw,ph,PAL["D"]);
@@ -3674,7 +3716,7 @@ function drawTitle(){
     "JUAN JOSE VENCE 3 ENEMIGOS Y ACTIVA SU MODO PODER",
     "JUAN JOSE PULSA S DOS VECES PARA UNA RAFAGA 360",
     "MANTEN S CON JUAN JOSE PARA LANZAR MAS LEJOS",
-    "PULSA P Y LUEGO G PARA GUARDAR TU PARTIDA",
+    "PULSA ESC EN LA PARTIDA PARA EL MENU DE PAUSA",
     "EL ESCUDO SOLO PROTEGE POR DELANTE"
   ];
   const tip=tips[Math.floor(performance.now()/3200)%tips.length];
@@ -3814,8 +3856,12 @@ function drawResults(){
 let last=performance.now()/1000,acc=0;
 function loop(nowMs){
   const now=nowMs/1000;let frame=Math.min(.25,now-last);last=now;acc+=frame;
-  while(acc>=CONFIG.FIXED_DT){update(CONFIG.FIXED_DT);acc-=CONFIG.FIXED_DT;}
-  render();requestAnimationFrame(loop);
+  // si algo falla, el bucle debe seguir vivo para no congelar el juego
+  try{
+    while(acc>=CONFIG.FIXED_DT){update(CONFIG.FIXED_DT);acc-=CONFIG.FIXED_DT;}
+    render();
+  }catch(err){ console.error(err); acc=0; }
+  requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
 </script>
