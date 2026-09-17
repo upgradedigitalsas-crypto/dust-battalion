@@ -819,7 +819,7 @@ function noise(dur=0.08,vol=0.2){
   s.connect(g); g.connect(master); s.start();
 }
 const sfxClips={};
-for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm","yell","boomerang","cannon","bark","bark2","laser","rocket","powerup","stomp","drone","mechdie","roar","acid","splat","charge","beam","screech","quake","gunshot","loading"]){
+for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm","yell","boomerang","cannon","bark","bark2","laser","rocket","powerup","stomp","drone","mechdie","roar","acid","splat","charge","beam","screech","quake","gunshot","loading","droneshot"]){
   const a=new Audio("assets/sfx/"+n+".mp3"); a.preload="auto"; sfxClips[n]=a;
 }
 function playClip(name,vol){
@@ -840,6 +840,7 @@ function gatlingStart(){ loopClip("gatling",true,0.42); }
 function gatlingStop(){ loopClip("gatling",false); }
 const SFX={
   gunshot(){playClip("gunshot",0.5);},
+  droneShot(){playClip("droneshot",0.5);},
   shot(){playClip("shot",0.5);},
   shotgun(){playClip("shotgun",0.6);},
   jump(){playClip("jump",0.45);},
@@ -1610,7 +1611,7 @@ class Drone extends Mech{
         this.cool=CONFIG.DRONE.fireRate+rnd(-.3,.4);
         const bx=this.x, by=this.y+7, ddx=player.x+14-bx, ddy=player.y+16-by, m=Math.hypot(ddx,ddy)||1;
         entities.push(new Bullet(bx,by,ddx/m*150,ddy/m*150,"enemy",1,"elaser"));
-        muzzleFlash(bx,by,ddx/m,ddy/m,4); addLight(bx,by,20,"255,60,140",0.07); SFX.laser();
+        muzzleFlash(bx,by,ddx/m,ddy/m,4); addLight(bx,by,20,"255,60,140",0.07); SFX.droneShot();
       }
     }
     this.x+=this.vx*dt;
