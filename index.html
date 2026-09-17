@@ -43,6 +43,8 @@ const CONFIG = {
   DRONE:{hp:2, fireRate:1.9},
   HEAVY:{hp:28, speed:16, gunRate:2.6, rocketRate:4.2},
   QUEEN:{sideHp:22, mouthHp:60, coreHp:50, beamTime:0.55},
+  SUPER:{kills:3, time:15},
+  BURST:{count:8, cd:2.5, tap:0.3},
   CONTINUES:2
 };
 
@@ -87,6 +89,10 @@ const bgImages = {
   1: loadBg("assets/bg-desert-day.jpg","assets/bg-desert.jpg"),
   2: loadBg("assets/bg-city-day.jpg","assets/bg-city.jpg")
 };
+function shiftRig(r,dy){
+  return {...r,legtop:r.legtop+dy,torsobot:r.torsobot+dy,pivy:r.pivy+dy,bot:r.bot+dy,
+    arms:r.arms&&r.arms.map(a=>({...a,poly:a.poly.map(([x,y])=>[x,y+dy]),piv:[a.piv[0],a.piv[1]+dy]}))};
+}
 function loadImg(src,rig){ const i=Object.assign(new Image(),{src}); i.rig=rig; return i; }
 // rig de recorte: linea de cadera, base del torso y pivote (en px del PNG de 300x300)
 const heroImages = [
@@ -102,9 +108,13 @@ const heroImages = [
   {name:"JUAN JOSÉ", weapon:"boomerang", h:40,
    run:loadImg("assets/sprite-kid_run.png",{legtop:170,torsobot:197,pivx:136,pivy:182,split:136,bot:293,arms:[{poly:[[52,92],[108,86],[118,118],[104,168],[52,168]],piv:[112,100],amp:0.35,back:true},{poly:[[204,118],[266,118],[266,192],[204,192]],piv:[198,150],amp:0.45}]}),
    idle:loadImg("assets/sprite-kid_idle.png"),
-   throwImg:loadImg("assets/sprite-kid_throw.png")}
+   throwImg:loadImg("assets/sprite-kid_throw.png"),
+   superRun:loadImg("assets/sprite-kid_run_super.png"), superIdle:loadImg("assets/sprite-kid_idle_super.png"),
+   superThrow:loadImg("assets/sprite-kid_throw_super.png")}
 ];
 const enemyRifleImg = loadImg("assets/sprite-enemy_rifle.png",{legtop:143,torsobot:167,pivx:110,pivy:154,split:110,bot:276,thigh:0.45,knee:1.05});
+for(const n of ["superRun","superIdle","superThrow"])heroImages[3][n].padTop=40;
+heroImages[3].superRun.rig=shiftRig(heroImages[3].run.rig,40);
 const enemyRobotImg = loadImg("assets/sprite-enemy_robot.png",{legtop:172,torsobot:192,pivx:128,pivy:180,split:128,bot:291,thigh:0.38,knee:0.8});
 const enemyHeavyImg = loadImg("assets/sprite-enemy_heavybot.png",{legtop:170,torsobot:190,pivx:130,pivy:180,split:130,bot:282,thigh:0.26,knee:0.55,foot:0.25,lean:0.03});
 const enemyRunnerImg = loadImg("assets/sprite-enemy_runner.png",{legtop:157,torsobot:183,pivx:104,pivy:168,split:104,bot:290,thigh:0.45,knee:1.05,arms:[{poly:[[20,68],[80,68],[82,172],[20,172]],piv:[78,92],amp:0.5,back:true},{poly:[[222,4],[300,4],[300,168],[196,168],[200,126],[222,112]],piv:[208,142],amp:0.22}]});
@@ -175,7 +185,8 @@ function armLayers(img){
 }
 function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
   const sw=img.naturalWidth, sh=img.naturalHeight;
-  const k=h/sh, w=sw*k;
+  // padTop: margen transparente arriba (pelo en puntas); h sigue midiendo el cuerpo original
+  const pad=img.padTop||0, k=h/(sh-pad), w=sw*k;
   const rig=img.rig, animate=moving&&rig&&rig.bot;
   const phase=anim*Math.PI*0.6;
   const lift=animate?(1-Math.abs(Math.sin(phase)))*2.6:0;
@@ -183,7 +194,7 @@ function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
   ctx.imageSmoothingEnabled=true;
   ctx.translate(Math.round(x),Math.round(y-lift));
   if(flip)ctx.scale(-1,1);
-  const left=-w/2, topY=-h;
+  const left=-w/2, topY=-h-pad*k;
   if(animate){
     const [kbx,kfx,abx,afx]=rigKnees(img);
     const kneeY=rig.pivy+(rig.bot-rig.pivy)*0.5, ankleY=rig.pivy+(rig.bot-rig.pivy)*(rig.ankle||0.84);
@@ -198,7 +209,7 @@ function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
       const a=L.a, rot=a.wave?Math.sin(phase*2+i*1.3)*a.amp:(a.back?-1:1)*Math.sin(phase)*a.amp;
       const X0=toX(a.piv[0]), Y0=toY(a.piv[1]);
       ctx.save(); ctx.translate(X0,Y0); ctx.rotate(rot); ctx.translate(-X0,-Y0);
-      ctx.drawImage(L.c,left,topY,w,h); ctx.restore();
+      ctx.drawImage(L.c,left,topY,w,sh*k); ctx.restore();
     };
     const legs=[[0,rig.split,phase+Math.PI,kbx,abx,true],[rig.split,sw-rig.split,phase,kfx,afx,false]];
     // relleno fijo entre los muslos: evita que se vea el fondo cuando las piernas se abren mucho
@@ -228,7 +239,7 @@ function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
     ctx.drawImage(src,0,0,sw,tb,left,topY,w,tb*k);
     if(arms) arms.forEach((L,i)=>{ if(!L.a.back)drawArm(L,i); });
   } else {
-    ctx.drawImage(img,left,topY,w,h);
+    ctx.drawImage(img,left,topY,w,sh*k);
   }
   ctx.restore();
 }
@@ -1047,8 +1058,8 @@ class ScorePopup extends Entity{
 class Boomerang extends Entity{
   // sale disparado, frena, y vuelve a la mano del lanzador atravesando enemigos
   constructor(owner,x,y,nx,ny,big=false){
-    super(x,y); this.owner=owner; this.big=big; this.hb=big?{x:-13,y:-9,w:26,h:18}:{x:-7,y:-5,w:14,h:10};
-    this.vx=nx*250; this.vy=ny*225; this.t=0; this.spin=0; this.returning=false;
+    super(x,y); this.owner=owner; this.mode=big==="super"?"super":big?"giant":null; this.big=!!big; this.hb=big?{x:-13,y:-9,w:26,h:18}:{x:-7,y:-5,w:14,h:10};
+    const spd=this.mode==="super"?1.3:1; this.vx=nx*250*spd; this.vy=ny*225*spd; this.t=0; this.spin=0; this.returning=false;
     this.hitSet=new Set(); this.trail=[];
   }
   update(dt){
@@ -1068,23 +1079,23 @@ class Boomerang extends Entity{
     for(const e of entities){
       if(e.dead||this.hitSet.has(e)||!aabb(b,box(e)))continue;
       if(isHostile(e)){
-        this.hitSet.add(e); e.hurt(this.big?4:2,"shot",sign(this.vx)||1); impactPuff(this.x,this.y);
+        this.hitSet.add(e); e.hurt(this.mode==="super"?6:this.big?4:2,"shot",sign(this.vx)||1); impactPuff(this.x,this.y);
       } else if(e instanceof Crate){ this.hitSet.add(e); e.hurt(2); }
       else if(e instanceof Hostage&&!e.freed){ e.free(); }
     }
-    if(Math.random()<0.5) addLight(this.x,this.y,18,"120,220,255",0.05);
+    if(Math.random()<0.5) addLight(this.x,this.y,this.mode==="super"?30:18,this.mode==="super"?"255,70,40":"120,220,255",0.05);
   }
   draw(cam){
     ctx.save(); ctx.globalCompositeOperation="lighter";
     for(let i=0;i<this.trail.length;i++){
       const [tx,ty]=this.trail[i];
-      ctx.fillStyle=`rgba(${this.big?"255,210,90":"120,220,255"},${((i+1)/this.trail.length*0.35).toFixed(3)})`;
+      ctx.fillStyle=`rgba(${this.mode==="super"?"255,60,40":this.big?"255,210,90":"120,220,255"},${((i+1)/this.trail.length*0.35).toFixed(3)})`;
       ctx.beginPath(); ctx.arc(tx-cam.x,ty,(3+i*0.4)*(this.big?1.8:1),0,Math.PI*2); ctx.fill();
     }
     ctx.restore();
     const img=objImages.boomerang;
     ctx.save(); ctx.translate(this.x-cam.x,this.y); ctx.rotate(this.spin);
-    if(imgReady(img)){ ctx.imageSmoothingEnabled=true; const bs=this.big?36:20; if(this.big)ctx.filter="sepia(1) saturate(3) brightness(1.3)"; ctx.drawImage(img,-bs/2,-bs/2,bs,bs); }
+    if(imgReady(img)){ ctx.imageSmoothingEnabled=true; const bs=this.mode==="super"?32:this.big?36:20; if(this.mode==="super")ctx.filter="hue-rotate(165deg) saturate(6) brightness(0.9) contrast(1.2)"; else if(this.big)ctx.filter="sepia(1) saturate(3) brightness(1.3)"; ctx.drawImage(img,-bs/2,-bs/2,bs,bs); }
     else {
       ctx.globalCompositeOperation="lighter"; ctx.lineCap="round";
       ctx.strokeStyle="rgba(140,230,255,1)"; ctx.lineWidth=3;
@@ -2218,13 +2229,13 @@ class Player extends Entity{
     super(x,y);this.hb={x:6,y:2,w:16,h:29};this.lives=CONFIG.PLAYER.lives;this.grenades=CONFIG.PLAYER.grenadeCount;
     this.special=0;this.rifleAmmo=0;this.fireCd=0;this.knifeCd=0;this.knifeT=0;this.invuln=1;this.facing=1;this.inTank=null;this.crouch=false;
     this.lastStep=-1;this.charIndex=game.charIndex||0;this.throwT=0;this.shield=100;this.shieldOn=false;this.shieldFlash=0;
-    this.laserAmmo=0;this.rocketAmmo=0;this.rapidT=0;this.shieldBoost=0;this.power=null;
+    this.laserAmmo=0;this.rocketAmmo=0;this.rapidT=0;this.shieldBoost=0;this.power=null;this.kills=0;this.superT=0;this.burstCd=0;this.lastTap=-9;
   }
   die(){
     if(this.invuln>0||game.state!=="PLAY"||this.inTank)return;
     this.lives--;SFX.death();shake(6,.25);
     for(let i=0;i<8;i++)particles.push(new Particle(this.x+14,this.y+12,rnd(-90,90),rnd(-150,-45),rnd(.35,.8)));
-    this.special=0;this.rifleAmmo=0;this.laserAmmo=0;this.rocketAmmo=0;this.power=null;this.grenades=CONFIG.PLAYER.grenadeCount;this.shield=100;this.shieldOn=false;
+    this.special=0;this.rifleAmmo=0;this.laserAmmo=0;this.rocketAmmo=0;this.power=null;this.superT=0;this.kills=0;this.grenades=CONFIG.PLAYER.grenadeCount;this.shield=100;this.shieldOn=false;
     if(this.lives<=0){game.state="GAMEOVER";return;}
     this.x=game.quake&&!game.quake.done?game.quake.camX+40:Math.max(game.checkpoint,48);this.y=80;this.vx=0;this.vy=0;this.invuln=CONFIG.PLAYER.invulnRespawn;
   }
@@ -2241,6 +2252,19 @@ class Player extends Entity{
       this.shieldOn=true; this.shield=Math.max(0,this.shield-CONFIG.SHIELD.drain*dt*(this.shieldBoost>0?0:1));
       if(this.shield<=0){this.shieldOn=false;SFX.shieldBreak();}
     } else { this.shieldOn=false; this.shield=Math.min(100,this.shield+CONFIG.SHIELD.regen*dt); }
+    this.burstCd-=dt;
+    if(heroImages[this.charIndex].weapon==="boomerang"&&hit("s","z")&&!this.shieldOn){
+      // doble toque de S: rafaga de boomerangs en 360 grados
+      if(game.runTime-this.lastTap<CONFIG.BURST.tap&&this.burstCd<=0){
+        this.burstCd=CONFIG.BURST.cd; this.lastTap=-9; this.throwT=0.3; this.fireCd=0.3;
+        const mode=this.superT>0?"super":this.power?.kind==="giant"?"giant":false, n=CONFIG.BURST.count;
+        for(let i=0;i<n;i++){ const a=i/n*Math.PI*2-Math.PI/2; entities.push(new Boomerang(this,this.x+14,this.y+12,Math.cos(a),Math.sin(a),mode)); }
+        SFX.boomerang(); SFX.charge(); flashScreen(.25); shake(2,.12);
+        addLight(this.x+14,this.y+12,70,mode==="super"?"255,80,50":"120,220,255",.25);
+        entities.push(new ScorePopup(this.x+14,this.y-16,"RAFAGA 360"));
+      } else this.lastTap=game.runTime;
+    }
+    if(this.superT>0){ this.superT=Math.max(0,this.superT-dt); if(Math.random()<dt*10)addLight(this.x+14,this.y+12,34,"255,210,90",.08); }
     if(this.power&&this.power.time!==undefined){ this.power.time-=dt; if(this.power.time<=0)this.power=null; }
     this.shieldFlash-=dt; this.shieldBoost-=dt; this.rapidT-=dt; if(this.rapidT>0)this.fireCd-=dt;
     const target=move*CONFIG.PLAYER.run, acc=this.onGround?CONFIG.PLAYER.accel:CONFIG.PLAYER.airAccel;
@@ -2280,9 +2304,9 @@ class Player extends Entity{
         if(pw.ammo<=0)this.power=null;
       } else if(heroImages[this.charIndex].weapon==="boomerang"){
         // el chico no usa armas de fuego: lanza su boomerang laser (maximo 2 en vuelo)
-        if(entities.filter(e=>e instanceof Boomerang&&!e.dead).length<(this.rapidT>0||this.power?.kind==="giant"?3:2)){
-          this.fireCd=0.28; this.throwT=0.22; SFX.boomerang();
-          entities.push(new Boomerang(this,this.x+14+aim.x*14,this.y+12+aim.y*8,aim.x,aim.y,this.power?.kind==="giant"));
+        if(entities.filter(e=>e instanceof Boomerang&&!e.dead).length<(this.rapidT>0||this.superT>0||this.power?.kind==="giant"?3:2)){
+          this.fireCd=this.superT>0?0.18:0.28; this.throwT=0.22; SFX.boomerang();
+          entities.push(new Boomerang(this,this.x+14+aim.x*14,this.y+12+aim.y*8,aim.x,aim.y,this.superT>0?"super":this.power?.kind==="giant"?"giant":false));
           addLight(this.x+14+aim.x*16,this.y+12,22,"120,220,255",0.08);
         }
       } else if(this.rocketAmmo>0){
@@ -2325,7 +2349,9 @@ class Player extends Entity{
     if(this.invuln>0&&Math.floor(this.invuln*14)%2===0)return;
     const hc=heroImages[this.charIndex];
     const moving=Math.abs(this.vx)>8;
-    const charImg=!this.crouch&&hc&&(this.throwT>0&&hc.throwImg?hc.throwImg:(moving?hc.run:(hc.idle||hc.run)));
+    const sup=this.superT>0&&hc.superRun&&imgReady(hc.superRun), pick=(a,b)=>sup&&a&&imgReady(a)?a:b;
+    const charImg=!this.crouch&&hc&&(this.throwT>0&&hc.throwImg?pick(hc.superThrow,hc.throwImg):(moving?pick(hc.superRun,hc.run):pick(hc.superIdle,hc.idle||hc.run)));
+    if(this.superT>0)drawSuperAura(this,cam,false);
     if(charImg&&imgReady(charImg)){
       drawCharImg(charImg,this.x-cam.x+14,this.y+32,hc.h||44,this.facing<0,this.anim,moving);
     } else {
@@ -2337,6 +2363,7 @@ class Player extends Entity{
       }
       drawSprite(sp,this.x-cam.x,this.y,2,this.facing<0);
     }
+    if(this.superT>0)drawSuperAura(this,cam,true);
     if(this.shieldOn||this.shieldFlash>0){
       const fx=this.x-cam.x+14+this.facing*14, fy=this.y+16, pulse=0.75+Math.sin(performance.now()/60)*0.25;
       const a=(this.shieldFlash>0?0.95:0.55)*pulse;
@@ -2375,6 +2402,44 @@ function aimVector(facing,L,R,U,D){
 /* ============================================================
    COMBATE
    ============================================================ */
+// Juan Jose: cada 3 enemigos vencidos entra en modo poder
+function onKill(){
+  const p=player; if(!p||heroImages[p.charIndex].weapon!=="boomerang"||p.superT>0)return;
+  p.kills=(p.kills||0)+1;
+  if(p.kills>=CONFIG.SUPER.kills){
+    p.kills=0; p.superT=CONFIG.SUPER.time; SFX.powerup(); SFX.charge(); flashScreen(.6); shake(4,.35);
+    addLight(p.x+14,p.y+14,90,"255,220,100",.5); entities.push(new ScorePopup(p.x+14,p.y-18,"MODO PODER"));
+    for(let i=0;i<16;i++)particles.push(new Particle(p.x+14,p.y+14,rnd(-120,120),rnd(-160,-20),rnd(.3,.7)));
+  }
+}
+function hash01(n){ const s=Math.sin(n*127.1)*43758.5453; return s-Math.floor(s); }
+function drawSuperAura(p,cam,front){
+  const cx=p.x-cam.x+14, cy=p.y+14, t=performance.now()/1000;
+  ctx.save(); ctx.globalCompositeOperation="lighter";
+  if(!front){
+    const pulse=0.6+0.4*Math.sin(t*14), g=ctx.createRadialGradient(cx,cy,2,cx,cy,26);
+    g.addColorStop(0,`rgba(255,230,120,${(0.38*pulse).toFixed(3)})`); g.addColorStop(0.6,`rgba(255,200,60,${(0.2*pulse).toFixed(3)})`); g.addColorStop(1,"rgba(255,180,40,0)");
+    ctx.fillStyle=g; ctx.beginPath(); ctx.ellipse(cx,cy-2,17,26,0,0,Math.PI*2); ctx.fill();
+    for(let i=0;i<6;i++){
+      const ph=(t*1.8+i/6)%1, fx=cx+Math.sin(i*2.3+t*3)*10, fy=cy+16-ph*38;
+      ctx.fillStyle=`rgba(255,225,110,${(0.55*(1-ph)).toFixed(3)})`;
+      ctx.beginPath(); ctx.moveTo(fx-2,fy+5); ctx.lineTo(fx,fy-6); ctx.lineTo(fx+2,fy+5); ctx.fill();
+    }
+  } else {
+    // rayos que cruzan el cuerpo y se regeneran unas 14 veces por segundo
+    const seed=Math.floor(t*14); ctx.lineCap="round"; ctx.lineJoin="round";
+    for(let b=0;b<4;b++){
+      if(hash01(seed*7+b)<0.3)continue;
+      const a0=hash01(seed*3+b*11)*Math.PI*2;
+      let x=cx+Math.cos(a0)*12, y=cy+Math.sin(a0)*18;
+      ctx.beginPath(); ctx.moveTo(x,y);
+      for(let s=0;s<5;s++){ x+=(hash01(seed*13+b*5+s)-0.5)*11; y+=(hash01(seed*17+b*3+s)-0.5)*11; ctx.lineTo(x,y); }
+      ctx.strokeStyle="rgba(150,225,255,0.5)"; ctx.lineWidth=2.6; ctx.stroke();
+      ctx.strokeStyle="rgba(255,255,255,0.95)"; ctx.lineWidth=0.9; ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
 function isHostile(e){ return e instanceof Enemy||e instanceof Turret||e instanceof Boss||e instanceof EnemyTank||e.hostile===true; }
 function enemyShoot(e){
   const dx=(player.x+14)-(e.x+14),dy=(player.y+12)-(e.y+10),m=Math.hypot(dx,dy)||1;
@@ -2612,6 +2677,7 @@ function update(dt){
   for(const e of entities) if(!e.dead)e.update(dt);
   for(const p of particles) if(!p.dead)p.update(dt);
   for(const m of mortars) if(!m.dead)m.update(dt);
+  for(const e of entities) if(e.dead&&!e._counted&&(e instanceof Enemy||e instanceof Turret||e instanceof EnemyTank||(e instanceof Mech&&!(e instanceof Egg)))){ e._counted=true; onKill(); }
   entities=entities.filter(e=>!e.dead);particles=particles.filter(p=>!p.dead);mortars=mortars.filter(m=>!m.dead);
 
   updateDescent(dt);
@@ -2991,6 +3057,12 @@ function drawHUD(){
   cornerBracket(54,1,124,barH-4,PAL["M"],3);
   textPx(String(game.score).padStart(7,"0"),CONFIG.W-6,4,2,PAL["K"],"right");
 
+  if(heroImages[player.charIndex].weapon==="boomerang"){
+    const x=6, y=barH+4;
+    if(player.superT>0) textPx("MODO PODER "+Math.ceil(player.superT),x,y,1,blinkOn()?PAL["K"]:PAL["J"]);
+    else { textPx("PODER",x,y,1,PAL["7"]); for(let i=0;i<CONFIG.SUPER.kills;i++){ ctx.fillStyle=i<(player.kills||0)?PAL["K"]:PAL["1"]; ctx.fillRect(x+24+i*6,y,4,5); } }
+    textPx(player.burstCd>0?"360 ...":"SS 360",x,y+8,1,player.burstCd>0?PAL["M"]:PAL["W"]);
+  }
   if(player.inTank){
     drawPanel(4,barH+3,96,13,PAL["B"]);
     textPx("BLINDADO "+player.inTank.armor,8,barH+6,1,PAL["F"]);
@@ -3046,6 +3118,8 @@ function drawTitle(){
     "CAJAS Y REHENES SUELTAN ARMAS Y POWER UPS",
     "CAMINA HASTA EL TANQUE PARA SUBIRTE",
     "JUAN JOSE LANZA SU BOOMERANG CON S",
+    "JUAN JOSE VENCE 3 ENEMIGOS Y ACTIVA SU MODO PODER",
+    "JUAN JOSE PULSA S DOS VECES PARA UNA RAFAGA 360",
     "EL ESCUDO SOLO PROTEGE POR DELANTE"
   ];
   const tip=tips[Math.floor(performance.now()/3200)%tips.length];
