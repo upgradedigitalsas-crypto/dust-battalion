@@ -9,12 +9,45 @@
   html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#120d0b}
   body{display:flex;align-items:center;justify-content:center}
   canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;background:#241813;box-shadow:0 0 0 2px #090706}
+  [hidden]{display:none!important}
+  #profiles{position:fixed;inset:0;z-index:3;display:flex;align-items:center;justify-content:center;background:rgba(8,5,4,.72);font-family:"Courier New",monospace;color:#ffe4a0;text-transform:uppercase}
+  #profiles .pf-box{width:min(560px,92vw);max-height:90vh;overflow:auto;background:#1a120e;border:3px solid #f8b83f;box-shadow:0 0 0 3px #090706,0 12px 40px #000;padding:18px 20px;box-sizing:border-box}
+  #profiles h1{margin:0 0 12px;font-size:22px;letter-spacing:3px;color:#fff07a;text-shadow:2px 2px 0 #8f2f1f;text-align:center}
+  #profiles button{display:block;width:100%;margin:6px 0;padding:10px 12px;background:#2b1a14;color:#ffe4a0;border:2px solid #754529;font:inherit;font-weight:bold;letter-spacing:1px;text-align:left;cursor:pointer;text-transform:uppercase}
+  #profiles button:hover,#profiles button:focus{outline:none;border-color:#fff07a;background:#4a2d1d;color:#fff}
+  #profiles button.pf-new{border-style:dashed;text-align:center;color:#9beaf0}
+  #profiles button.pf-danger{color:#ff8a6a}
+  #profiles .pf-sub{display:block;font-size:12px;color:#d7974a;font-weight:normal;margin-top:3px;text-transform:none}
+  #profiles .pf-info{font-size:13px;color:#d7974a;text-align:center;margin:0 0 10px;text-transform:none}
+  #profiles label{display:block;margin:10px 0 4px;font-size:13px;letter-spacing:2px}
+  #profiles input{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:9px;background:#0e0907;color:#fff;border:2px solid #754529;font:inherit;font-size:16px;text-transform:none}
+  #profiles input:focus{outline:none;border-color:#fff07a}
+  #profiles .pf-row{display:flex;gap:8px}
+  #profiles .pf-row button{text-align:center}
+  #pf-err{min-height:1.2em;color:#ff6a4a;font-size:13px;margin:6px 0 0}
+  #profiles .pf-hint{font-size:11px;color:#928579;text-align:center;margin:12px 0 0}
   #shader{position:fixed;left:0;top:0;pointer-events:none;opacity:0;transition:opacity .5s ease;background:#000;box-shadow:none;image-rendering:auto;z-index:2}
 </style>
 </head>
 <body>
 <canvas id="game" width="384" height="224" aria-label="Dust Battalion"></canvas>
 <canvas id="shader" aria-hidden="true"></canvas>
+<div id="profiles" hidden role="dialog" aria-labelledby="pf-title">
+  <div class="pf-box">
+    <h1 id="pf-title">PERFILES</h1>
+    <div id="pf-list"></div>
+    <div id="pf-detail" hidden></div>
+    <form id="pf-form" hidden autocomplete="off" novalidate>
+      <label for="pf-name">Nombre</label>
+      <input id="pf-name" maxlength="16" placeholder="Tu nombre">
+      <label for="pf-user">Usuario</label>
+      <input id="pf-user" maxlength="12" placeholder="3 a 12 letras, numeros o _" spellcheck="false" autocapitalize="off">
+      <p id="pf-err" role="alert"></p>
+      <div class="pf-row"><button type="submit">Crear perfil</button><button type="button" id="pf-cancel">Cancelar</button></div>
+    </form>
+    <p class="pf-hint">&uarr; &darr; elegir &middot; Enter aceptar &middot; Esc volver &middot; se guarda en este navegador</p>
+  </div>
+</div>
 <script>
 "use strict";
 
@@ -775,6 +808,7 @@ const blinkOn=()=>Math.floor(performance.now()/380)%2===0;
 const keys=Object.create(null), pressed=Object.create(null);
 addEventListener("keydown",e=>{
   initAudio();
+  if(typeof game!=="undefined"&&game.state==="PROFILE"){ profileKey(e); return; }
   const k=e.key.toLowerCase();
   if(!keys[k]) pressed[k]=true;
   keys[k]=true;
@@ -1727,6 +1761,7 @@ function buildLair(){
   cam.x=0; game.checkpoint=40;
   boss=new SandQueen(); entities.push(boss);
   if(heroImages[player.charIndex].weapon==="boomerang")entities.push(new Buddy(player));
+  saveGame(false);
 }
 function drawLairBg(){
   ctx.fillStyle="#1c0a07"; ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
@@ -1878,7 +1913,7 @@ class SandQueen extends Entity{
     if(this.dying){
       this.dieT-=dt; this.jaw+=(1-this.jaw)*Math.min(1,dt*3); this.rise=clamp((1.2-this.dieT)/1.2,0,1)*0.6;
       if(Math.random()<dt*12)this.boom(QUEEN.x+rnd(-80,80),rnd(10,200),Math.random()<.35);
-      if(this.dieT<=0){ this.dead=true; for(const q of this.parts)q.dead=true; flashScreen(1); game.state="RESULTS"; game.clearTime=game.runTime; }
+      if(this.dieT<=0){ this.dead=true; for(const q of this.parts)q.dead=true; flashScreen(1); game.state="RESULTS"; game.clearTime=game.runTime; finishRun(true); }
       this.layout(dt); return;
     }
     if(this.intro>0){
@@ -2099,7 +2134,7 @@ function updateQuake(dt){
       q.shakeT=1.2; SFX.quake(); q.wave++; q.waveT=1.2;
     }
   } else if(alive===0){
-    q.done=true; q.doneT=q.t; game.score+=5000; SFX.rescue();
+    q.done=true; q.doneT=q.t; game.score+=5000; SFX.rescue(); saveGame(false);
     entities.push(new ScorePopup(player.x+14,player.y-20,"+5000"));
   }
 }
@@ -2281,7 +2316,7 @@ class Player extends Entity{
     this.lives--;SFX.death();gatlingStop();shake(6,.25);
     for(let i=0;i<8;i++)particles.push(new Particle(this.x+14,this.y+12,rnd(-90,90),rnd(-150,-45),rnd(.35,.8)));
     this.special=0;this.rifleAmmo=0;this.laserAmmo=0;this.rocketAmmo=0;this.power=null;this.superT=0;this.kills=0;this.grenades=CONFIG.PLAYER.grenadeCount;this.shield=100;this.shieldOn=false;
-    if(this.lives<=0){game.state="GAMEOVER";return;}
+    if(this.lives<=0){game.state="GAMEOVER";finishRun(false);return;}
     this.x=game.quake&&!game.quake.done?game.quake.camX+40:Math.max(game.checkpoint,48);this.y=80;this.vx=0;this.vy=0;this.invuln=CONFIG.PLAYER.invulnRespawn;
   }
   update(dt){
@@ -2757,6 +2792,112 @@ function continueGame(){
 function shake(mag,t){cam.shakeMag=Math.max(cam.shakeMag,mag);cam.shakeT=Math.max(cam.shakeT,t);}
 
 /* ============================================================
+   PERFILES Y PARTIDAS GUARDADAS (localStorage de este navegador)
+   ============================================================ */
+const STORE_KEY="dustBattalion.v1";
+function loadStore(){ try{ const s=JSON.parse(localStorage.getItem(STORE_KEY)); if(s&&s.profiles&&typeof s.profiles==="object")return s; }catch(e){} return {profiles:{},last:null}; }
+function saveStore(s){ try{ localStorage.setItem(STORE_KEY,JSON.stringify(s)); return true; }catch(e){ return false; } }
+function updateProfile(fn){
+  if(!game.profile)return false;
+  const s=loadStore(), p=s.profiles[game.profile]; if(!p)return false;
+  fn(p); s.last=game.profile; return saveStore(s);
+}
+function toast(text){ game.toast={text,t:2.2}; }
+function saveGame(manual){
+  if(!game.profile||game.state!=="PLAY"||!player)return;
+  const data={stage:game.lair?"lair":"level",x:game.lair?40:game.checkpoint,charIndex:game.charIndex,score:game.score,hostages:game.hostages,
+    continues:game.continues,lives:player.lives,hp:player.hp,grenades:player.grenades,quakeDone:!!(game.quake&&game.quake.done),runTime:game.runTime,at:Date.now()};
+  const ok=updateProfile(p=>{ p.save=data; p.lastPlayed=Date.now(); });
+  toast(ok?(manual?"PARTIDA GUARDADA":"GUARDADO AUTOMATICO"):"NO SE PUDO GUARDAR");
+}
+function applySave(s){
+  game.score=s.score|0; game.hostages=s.hostages|0; game.continues=s.continues??CONFIG.CONTINUES; game.runTime=+s.runTime||0;
+  player.lives=clamp(s.lives|0,1,9); player.hp=clamp(+s.hp||CONFIG.PLAYER.maxHp,1,CONFIG.PLAYER.maxHp); player.grenades=clamp(s.grenades??CONFIG.PLAYER.grenadeCount,0,9);
+  if(s.stage==="lair"){ buildLair(); return; }
+  const x=clamp(s.x|0,48,WORLD_W-400);
+  game.checkpoint=x; player.x=x; player.y=groundYAt(x+14)-40; cam.x=clamp(x-110,0,WORLD_W-CONFIG.W);
+  for(const e of entities){ if(e instanceof Buddy)e.x=x-20; else if(e.x<x-180&&!(e instanceof Tank))e.dead=true; }
+  if(s.quakeDone)game.quake={t:99,doneT:0,done:true,wave:QUAKE.waves.length,spawned:[],cracks:[],camX:0,shakeT:0,crate:true};
+}
+function finishRun(won){
+  updateProfile(p=>{ p.best=Math.max(p.best||0,game.score); p.plays=(p.plays||0)+1; if(won){ p.wins=(p.wins||0)+1; p.save=null; } });
+}
+const $pf=id=>document.getElementById(id);
+function mk(tag,cls,text){ const e=document.createElement(tag); if(cls)e.className=cls; if(text!=null)e.textContent=text; return e; }
+function openProfiles(){
+  game.state="PROFILE"; clearPressed(); for(const k in keys)keys[k]=false;
+  $pf("profiles").hidden=false; showProfileList();
+}
+function showProfileList(){
+  const s=loadStore(), list=$pf("pf-list"); list.replaceChildren();
+  list.hidden=false; $pf("pf-form").hidden=true; $pf("pf-detail").hidden=true; $pf("pf-title").textContent="Perfiles";
+  const users=Object.keys(s.profiles).sort((a,b)=>(s.profiles[b].lastPlayed||0)-(s.profiles[a].lastPlayed||0));
+  for(const u of users){
+    const p=s.profiles[u], b=mk("button",null,p.name);
+    b.append(mk("span","pf-sub",`@${u} · ${heroImages[p.hero]?.name||"sin heroe"} · record ${p.best||0}${p.save?" · partida guardada":""}`));
+    b.onclick=()=>showProfileDetail(u); list.append(b);
+  }
+  const nb=mk("button","pf-new","+ Crear perfil"); nb.onclick=showProfileForm; list.append(nb);
+  (list.querySelector("button")||nb).focus();
+}
+function showProfileDetail(u){
+  const p=loadStore().profiles[u]; if(!p)return showProfileList();
+  $pf("pf-list").hidden=true; const d=$pf("pf-detail"); d.replaceChildren(); d.hidden=false; $pf("pf-title").textContent=p.name;
+  d.append(mk("p","pf-info",`@${u} · heroe ${heroImages[p.hero]?.name||"-"} · record ${p.best||0} · misiones ${p.wins||0}`));
+  const add=(t,fn,cls)=>{ const b=mk("button",cls,t); b.onclick=fn; d.append(b); return b; };
+  let first=null;
+  if(p.save){
+    const sv=p.save; first=add("Continuar partida",()=>startFromProfile(u,true));
+    first.append(mk("span","pf-sub",`${sv.stage==="lair"?"guarida de la reina":"punto de control "+sv.x} · ${heroImages[sv.charIndex]?.name||""} · ${sv.score} pts · ${new Date(sv.at).toLocaleString("es")}`));
+  }
+  const nb=add("Nueva partida",()=>startFromProfile(u,false)); first=first||nb;
+  add("Borrar perfil",()=>{ if(confirm(`¿Borrar el perfil @${u} y su partida guardada?`)){ const st=loadStore(); delete st.profiles[u]; if(st.last===u)st.last=null; saveStore(st); showProfileList(); } },"pf-danger");
+  add("Volver",showProfileList);
+  first.focus();
+}
+function showProfileForm(){
+  $pf("pf-list").hidden=true; $pf("pf-detail").hidden=true;
+  const f=$pf("pf-form"); f.reset(); f.hidden=false; $pf("pf-err").textContent=""; $pf("pf-title").textContent="Nuevo perfil";
+  $pf("pf-name").focus();
+}
+$pf("pf-cancel").onclick=()=>showProfileList();
+$pf("pf-form").onsubmit=e=>{
+  e.preventDefault();
+  const name=$pf("pf-name").value.trim().replace(/\s+/g," "), user=$pf("pf-user").value.trim().toLowerCase(), err=$pf("pf-err");
+  if(name.length<2){ err.textContent="El nombre debe tener al menos 2 letras"; $pf("pf-name").focus(); return; }
+  if(!/^[a-z0-9_]{3,12}$/.test(user)){ err.textContent="Usuario: de 3 a 12 letras, numeros o _ (sin espacios)"; $pf("pf-user").focus(); return; }
+  const s=loadStore();
+  if(s.profiles[user]){ err.textContent="Ese usuario ya existe en este navegador"; $pf("pf-user").focus(); return; }
+  s.profiles[user]={name:name.slice(0,16),hero:0,best:0,wins:0,plays:0,created:Date.now(),lastPlayed:Date.now(),save:null}; s.last=user;
+  if(!saveStore(s)){ err.textContent="No se pudo guardar: el almacenamiento del navegador esta bloqueado"; return; }
+  startFromProfile(user,false);
+};
+function startFromProfile(u,cont){
+  const s=loadStore(), p=s.profiles[u]; if(!p)return showProfileList();
+  game.profile=u; p.lastPlayed=Date.now(); s.last=u; saveStore(s);
+  $pf("profiles").hidden=true; clearPressed(); for(const k in keys)keys[k]=false;
+  if(cont&&p.save){
+    game.pendingSave=p.save; game.charIndex=clamp(p.save.charIndex|0,0,heroImages.length-1);
+    game.state="LOADING"; game.loadT=0; loader.show(); playClip("loading",0.85);
+  } else { game.pendingSave=null; game.charIndex=clamp(p.hero|0,0,heroImages.length-1); game.state="CHARSELECT"; }
+}
+function profileKey(e){
+  const root=$pf("profiles"), inInput=e.target&&e.target.tagName==="INPUT";
+  if(e.key==="Escape"){
+    e.preventDefault();
+    if(!$pf("pf-form").hidden||!$pf("pf-detail").hidden)showProfileList();
+    else { root.hidden=true; game.state="TITLE"; }
+    return;
+  }
+  if((e.key==="ArrowDown"||e.key==="ArrowUp")&&!inInput){
+    e.preventDefault();
+    const btns=[...root.querySelectorAll("button")].filter(b=>b.offsetParent!==null);
+    const i=btns.indexOf(document.activeElement), n=btns.length; if(!n)return;
+    btns[(i+(e.key==="ArrowDown"?1:-1)+n)%n].focus();
+  }
+}
+
+/* ============================================================
    PANTALLA DE CARGA: shader WebGL2 animado sin texto
    Shader original de Matthias Hurrle (@atzedent), adaptado del componente "animated-shader-hero"
    ============================================================ */
@@ -2841,11 +2982,12 @@ function assetsReady(){
 function update(dt){
   musicTick(dt);
   if(game.state!=="PLAY"||game.paused)gatlingStop();
+  if(game.toast){ game.toast.t-=dt; if(game.toast.t<=0)game.toast=null; }
   loopClip("ambience",!game.paused,game.state==="PLAY"?(game.lair?0.12:0.2):0.08);
   updateWind(dt);
   if(hit("p")&&game.state==="PLAY")game.paused=!game.paused;
   if(game.state==="TITLE"){
-    if(hit("s","z","enter"))game.state="CHARSELECT";
+    if(hit("s","z","enter"))openProfiles();
     clearPressed();return;
   }
   if(game.state==="CHARSELECT"){
@@ -2861,8 +3003,8 @@ function update(dt){
     }
     if(hit("arrowleft"))game.charIndex=(game.charIndex+heroImages.length-1)%heroImages.length;
     if(hit("arrowright"))game.charIndex=(game.charIndex+1)%heroImages.length;
-    if(hit("s","z","enter")){ game.cheer={t:0}; if(!heroImages[game.charIndex].transform){ SFX.rescue(); SFX.powerup(); } }
-    if(hit("escape","x"))game.state="TITLE";
+    if(hit("s","z","enter")){ game.cheer={t:0}; updateProfile(p=>{p.hero=game.charIndex;}); if(!heroImages[game.charIndex].transform){ SFX.rescue(); SFX.powerup(); } }
+    if(hit("escape","x"))openProfiles();
     clearPressed();return;
   }
   if(game.state==="LOADING"){
@@ -2870,6 +3012,7 @@ function update(dt){
     if((game.loadT>=LOAD_TIME&&(assetsReady()||game.loadT>8))||(game.loadT>1.5&&hit("s","z","enter"))){
       loader.hide(); startGame(true);
       if(heroImages[game.charIndex].transform)player.superT=CONFIG.SUPER.time;
+      if(game.pendingSave){ applySave(game.pendingSave); game.pendingSave=null; toast("PARTIDA CARGADA"); }
     }
     clearPressed(); return;
   }
@@ -2881,7 +3024,7 @@ function update(dt){
     if(hit("s","z","enter"))game.state="TITLE";
     clearPressed();return;
   }
-  if(game.paused){clearPressed();return;}
+  if(game.paused){ if(hit("g"))saveGame(true); clearPressed(); return; }
 
   game.runTime+=dt;
   updateLights(dt);
@@ -2898,8 +3041,10 @@ function update(dt){
   updateQuake(dt);
   if(game.quake&&!game.quake.done){ const q=game.quake; player.x=clamp(player.x,q.camX,q.camX+CONFIG.W-28); if(player.inTank)player.inTank.x=clamp(player.inTank.x,q.camX,q.camX+CONFIG.W-44); }
   // Checkpoints
+  const cp0=game.checkpoint;
   if(player.x>900)game.checkpoint=Math.max(game.checkpoint,900);
   if(player.x>1750)game.checkpoint=Math.max(game.checkpoint,1750);
+  if(game.checkpoint>cp0)saveGame(false);
 
   // Emboscada: oleadas desde ambos lados y morteros
   if(player.x>CONFIG.WORLD.ambushStart && player.x<CONFIG.WORLD.ambushEnd && !boss){
@@ -3226,6 +3371,11 @@ function render(){
   drawDescent();
   drawQuakeText();
   drawHUD();
+  if(game.toast&&game.state==="PLAY"){
+    const a=clamp(game.toast.t/0.4,0,1), w=game.toast.text.length*4+16;
+    ctx.save(); ctx.globalAlpha=a; ctx.fillStyle="rgba(10,6,4,.8)"; ctx.fillRect(CONFIG.W/2-w/2,34,w,13);
+    textPx(game.toast.text,CONFIG.W/2,38,1,PAL["K"],"center"); ctx.restore();
+  }
   if(game.state==="TITLE")drawTitle();
   if(game.state==="CHARSELECT")drawCharSelect();
   if(game.state==="GAMEOVER")drawGameOver();
@@ -3236,6 +3386,7 @@ function render(){
     cornerBracket(140,90,104,34,PAL["6"],6);
     textPx("PAUSA",CONFIG.W/2+1,105,3,PAL["G"],"center");
     textPx("PAUSA",CONFIG.W/2,104,3,PAL["K"],"center");
+    if(game.profile){ keyCap(CONFIG.W/2-46,134,"G"); textPx("GUARDAR PARTIDA",CONFIG.W/2-30,137,1,PAL["7"]); }
   }
   crtOverlay();
 }
@@ -3350,6 +3501,7 @@ function drawTitle(){
     "JUAN JOSE VENCE 3 ENEMIGOS Y ACTIVA SU MODO PODER",
     "JUAN JOSE PULSA S DOS VECES PARA UNA RAFAGA 360",
     "MANTEN S CON JUAN JOSE PARA LANZAR MAS LEJOS",
+    "PULSA P Y LUEGO G PARA GUARDAR TU PARTIDA",
     "EL ESCUDO SOLO PROTEGE POR DELANTE"
   ];
   const tip=tips[Math.floor(performance.now()/3200)%tips.length];
