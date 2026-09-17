@@ -77,9 +77,9 @@ const CONFIG = {
   ROBOT:{hp:4, speed:30, burstRate:2.1},
   DRONE:{hp:2, fireRate:1.9},
   HEAVY:{hp:28, speed:16, gunRate:2.6, rocketRate:4.2},
-  QUEEN:{sideHp:22, mouthHp:60, coreHp:50, beamTime:0.55},
+  QUEEN:{sideHp:22, mouthHp:60, coreHp:50, beamTime:0.55, regens:3, regenTime:4.5, regenHeal:0.1, regenAt:[0.75,0.5,0.28]},
   SUPER:{kills:3, time:15},
-  RAGE:{time:25, dmgMul:0.5},
+  RAGE:{time:25, dmgMul:0.5, bombs:5, homing:3.2, bombDmg:7, bombRadius:46},
   BURST:{count:8, cd:2.5, tap:0.3},
   CONTINUES:2
 };
@@ -285,7 +285,7 @@ const objImages = {
   larva:loadImg("assets/sprite-larva.png"), egg:loadImg("assets/sprite-egg.png"),
   wMinigun:loadImg("assets/sprite-weapon_minigun.png"), wFlame:loadImg("assets/sprite-weapon_flamer.png"),
   wPlasma:loadImg("assets/sprite-weapon_plasma.png"), chute:loadImg("assets/sprite-supply_drop.png"),
-  rage:proceduralRageOrb(),
+  rage:proceduralRageOrb(), medkit:loadImg("assets/sprite-medkit.png"), bloodbag:loadImg("assets/sprite-bloodbag.png"),
   bldg1:proceduralBuilding(0), bldg2:proceduralBuilding(1), rubble:proceduralRubble()
 };
 function imgReady(img){ return img && img.complete && img.naturalWidth>0; }
@@ -1233,6 +1233,36 @@ class ScorePopup extends Entity{
     ctx.restore();
   }
 }
+class EnergyBomb extends Entity{
+  // bomba de energia de la fase roja: cae en arco y estalla al tocar suelo o enemigo
+  constructor(x,y,nx,ny){
+    super(x,y); this.vx=nx*210; this.vy=ny*160-90; this.fuse=1.4; this.t=0; this.hb={x:-5,y:-5,w:10,h:10};
+  }
+  boom(){
+    if(this.dead)return;
+    this.dead=true;
+    explode(this.x,this.y,CONFIG.RAGE.bombRadius,CONFIG.RAGE.bombDmg,"player");
+    addLight(this.x,this.y,90,"255,70,50",.35); flashScreen(.25);
+    for(let i=0;i<12;i++)particles.push(new Particle(this.x,this.y,rnd(-140,140),rnd(-160,40),rnd(.3,.7)));
+  }
+  update(dt){
+    this.t+=dt; this.fuse-=dt; this.vy+=460*dt; this.x+=this.vx*dt; this.y+=this.vy*dt;
+    if(Math.random()<0.6)particles.push(new Particle(this.x,this.y,rnd(-20,20),rnd(-20,10),.25));
+    addLight(this.x,this.y,22,"255,80,50",.05);
+    if(this.fuse<=0||this.y>=groundYAt(this.x)-3||this.x<0||this.x>WORLD_W){ this.boom(); return; }
+    const b=box(this);
+    for(const e of entities) if(!e.dead&&isHostile(e)&&aabb(b,box(e))){ this.boom(); return; }
+  }
+  draw(cam){
+    const x=this.x-cam.x, p=0.7+0.3*Math.sin(this.t*22);
+    ctx.save(); ctx.globalCompositeOperation="lighter";
+    const g=ctx.createRadialGradient(x,this.y,0,x,this.y,9*p);
+    g.addColorStop(0,"rgba(255,240,220,0.95)"); g.addColorStop(0.4,"rgba(255,70,50,0.8)"); g.addColorStop(1,"rgba(200,20,10,0)");
+    ctx.fillStyle=g; ctx.fillRect(x-10,this.y-10,20,20);
+    ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(x,this.y,2.2,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+}
 class Boomerang extends Entity{
   // sale disparado, frena, y vuelve a la mano del lanzador atravesando enemigos
   constructor(owner,x,y,nx,ny,big=false,power=0){
@@ -1244,6 +1274,19 @@ class Boomerang extends Entity{
     this.t+=dt; this.spin+=dt*22;
     if(!this.returning){
       const f=Math.pow(0.12+0.6*this.power,dt); this.vx*=f; this.vy*=f;
+      if(this.mode==="rage"){
+        // en fase roja el boomerang se curva hacia el objetivo mas cercano
+        let best=null,bd=1e9;
+        for(const e of entities){
+          if(e.dead||!isHostile(e)||this.hitSet.has(e))continue;
+          const b=box(e), dx=b.x+b.w/2-this.x, dy=b.y+b.h/2-this.y, d=Math.hypot(dx,dy);
+          if(d<160&&d<bd){ bd=d; best=[dx/d,dy/d]; }
+        }
+        if(best){
+          const sp=Math.max(120,Math.hypot(this.vx,this.vy)), k=Math.min(1,CONFIG.RAGE.homing*dt);
+          this.vx+=(best[0]*sp-this.vx)*k; this.vy+=(best[1]*sp-this.vy)*k;
+        }
+      }
       if(this.t>0.42*(1+1.3*this.power)){ this.returning=true; this.hitSet.clear(); }
     } else {
       const ox=this.owner.x+14, oy=this.owner.y+12, dx=ox-this.x, dy=oy-this.y, d=Math.hypot(dx,dy)||1;
@@ -1491,7 +1534,7 @@ class EnemyTank extends Entity{
   }
 }
 // icono, ancho en pantalla, alto/ancho, color del halo
-const ITEM_ICONS={rage:["rage",17,1,"255,70,50"],laser:["wLaser",22,1,"80,210,255"],rocket:["wRocket",22,1,"255,170,60"],shieldup:["pShield",13,1,"90,220,255"],rapid:["pRapid",11,1,"255,150,50"],life:["pLife",13,1,"90,255,120"]};
+const ITEM_ICONS={rage:["rage",17,1,"255,70,50"],health:["medkit",15,1,"255,90,90"],blood:["bloodbag",14,1,"255,60,60"],laser:["wLaser",22,1,"80,210,255"],rocket:["wRocket",22,1,"255,170,60"],shieldup:["pShield",13,1,"90,220,255"],rapid:["pRapid",11,1,"255,150,50"],life:["pLife",13,1,"90,255,120"]};
 const POWERS=[{kind:"minigun",name:"MINIGUN",ammo:220},{kind:"flame",name:"LANZALLAMAS",ammo:160},{kind:"plasma",name:"CANON DE PLASMA",ammo:24},{kind:"giant",name:"BOOMERANG GIGANTE",time:25}];
 const POWER_ICONS=[["wMinigun",24,1,"255,200,80"],["wFlame",24,1,"255,120,40"],["wPlasma",24,1,"170,120,255"],["boomerang",18,1,"255,220,90"]];
 class Item extends Entity{
@@ -1868,7 +1911,7 @@ function buildLair(){
   game.lair=true; entities=[];particles=[];mortars=[];WIND.bits.length=0;lights=[];
   player.inTank=null; player.x=40; player.y=LAIR.ground-40; player.vx=0; player.vy=0; player.invuln=Math.max(player.invuln,2);
   cam.x=0; game.checkpoint=40;
-  boss=new SandQueen(); entities.push(boss);
+  boss=new SandQueen(); entities.push(boss); game.orbT=18;
   if(heroImages[player.charIndex].weapon==="boomerang")entities.push(new Buddy(player));
   entities.push(Object.assign(new Item(96,LAIR.ground-10,"rage"),{life:1e9}));
   saveGame(false);
@@ -1991,24 +2034,55 @@ class SandQueen extends Entity{
     entities.push(...this.parts);
     this.max=CONFIG.QUEEN.sideHp*2+CONFIG.QUEEN.mouthHp+CONFIG.QUEEN.coreHp;
     this.jaw=0; this.mouthState="closed"; this.mouthT=2; this.eggT=0; this.cycle=0;
-    this.beam=null; this.beamT=2.5; this.beamLow=false; this.rainT=3; this.larvaT=5; this.eyeGlow=0; this.shell=0;
+    this.beam=null; this.beamT=2.5; this.beamLow=false; this.rainT=3; this.larvaT=5; this.eyeGlow=0; this.shell=0; this.supplyT=9; this.supplyN=0; this.regens=0; this.regenT=0; this.regenStep=0;
   }
   get hp(){ return this.sides.reduce((a,s)=>a+s.part.hp,0)+this.mouth.hp+this.core.hp; }
   get parts(){ return [...this.sides.map(s=>s.part),this.mouth,this.core,this.armor,this.plate]; }
   roar(){ SFX.roar(); shake(4,.5); this.eyeGlow=1; }
+  startRegen(){
+    this.regens++; this.regenT=CONFIG.QUEEN.regenTime; this.jawTarget=0;
+    for(const q of this.parts)q.hostile=false;
+    this.beam=null; this.burst=0; this.mouthState="closed"; this.eyeGlow=0;
+    SFX.roar(); shake(3,.3); toast("LA REINA SE REGENERA");
+    for(const s of this.sides){ s.lunge=0; s.windup=0; s.lungeT=rnd(2,3); }
+  }
+  healParts(dt){
+    // reparte la cura (10% repartido durante el sueño) entre las piezas vivas
+    let heal=this.max*CONFIG.QUEEN.regenHeal*dt/CONFIG.QUEEN.regenTime;
+    const list=[this.core,this.mouth,...this.sides.filter(s=>!s.dead).map(s=>s.part)];
+    for(const p of list){
+      if(heal<=0)break;
+      if(p.hp<=0||p.hp>=p.max)continue;
+      const add=Math.min(heal,p.max-p.hp); p.hp+=add; heal-=add;
+    }
+    // si todo lo vivo esta al maximo, refuerza la pieza que toca atacar
+    if(heal>0){
+      const alive=this.sides.filter(s=>!s.dead).map(s=>s.part);
+      const target=this.phase===3?this.core:this.phase===2?this.mouth:(alive[0]||this.mouth);
+      if(target)target.hp=Math.min(target.max*1.6,target.hp+heal);
+    }
+  }
+  dropSupply(kind){
+    this.supplyN++;
+    const kid=heroImages[player.charIndex].weapon==="boomerang";
+    const armas=kid?["rage","rapid","shieldup"]:["laser","rocket","shotgun","rapid","shieldup"];
+    const type=kind||(this.supplyN%2?(Math.random()<.5?"health":"blood"):armas[Math.floor(Math.random()*armas.length)]);
+    entities.push(new SupplyDrop(clamp(player.x+14+rnd(-70,70),26,190),type));
+    toast(type==="health"||type==="blood"?"CAE UN BOTIQUIN":"CAEN SUMINISTROS");
+  }
   boom(x,y,big){ entities.push(new Explosion(x,y,big)); addLight(x,y,big?90:50,"255,150,60",big?.4:.25); flashScreen(big?.35:.15); shake(big?5:3,big?.2:.1); SFX.boom(); }
   partDown(p){
     const s=this.sides.find(q=>q.part===p);
     if(s){
       s.dead=true; this.boom(s.x,s.y,true); SFX.roar(); game.score+=2000; entities.push(new ScorePopup(s.x,s.y-14,"+2000"));
-      if(this.sides.every(q=>q.dead)){ this.phase=2; this.mouthT=1.5; this.roar(); entities.push(new Item(120,LAIR.ground-30,"shieldup")); }
+      if(this.sides.every(q=>q.dead)){ this.phase=2; this.mouthT=1.5; this.roar(); entities.push(new Item(120,LAIR.ground-30,"shieldup")); this.dropSupply("blood"); }
       return;
     }
     if(p===this.mouth){
       this.phase=3; this.mouthState="broken"; this.roar(); this.beamT=2.2; game.score+=3000; entities.push(new ScorePopup(QUEEN.x,60,"+3000"));
       for(let i=0;i<6;i++)this.boom(QUEEN.x+rnd(-30,30),rnd(60,190),i%2===0);
       for(let i=0;i<14;i++)particles.push(new Particle(QUEEN.core[0],QUEEN.core[1],rnd(-160,60),rnd(-200,-60),rnd(.5,1)));
-      entities.push(new Item(100,LAIR.ground-30,"rapid"));
+      entities.push(new Item(100,LAIR.ground-30,"rapid")); this.dropSupply("health");
       return;
     }
     if(p===this.core){
@@ -2032,9 +2106,26 @@ class SandQueen extends Entity{
       if(this.intro<=0){ this.phase=1; this.roar(); }
       this.layout(dt); return;
     }
+    if(this.regenT>0){
+      // duerme y se cura: no ataca y no recibe dano
+      this.regenT-=dt;
+      this.healParts(dt);
+      if(Math.random()<dt*22){
+        const x=QUEEN.x+rnd(-70,70), y=rnd(40,190)+this.oy*0.3;
+        particles.push(new Particle(x,y,rnd(-12,12),rnd(-60,-20),rnd(.5,.9),"smoke"));
+        addLight(x,y,26,"90,255,170",.08);
+      }
+      if(this.regenT<=0){ for(const q of this.parts)q.hostile=true; this.layout(dt); this.roar(); }
+      this.layout(dt); return;
+    }
+    const pct=this.hp/this.max;
+    if(this.regens<CONFIG.QUEEN.regens&&pct<=CONFIG.QUEEN.regenAt[this.regens]&&this.phase>0){ this.startRegen(); this.layout(dt); return; }
     if(this.phase===1)this.updateSides(dt);
     if(this.phase===2)this.updateMouth(dt);
     if(this.phase===3)this.updateCore(dt);
+    // durante la pelea caen suministros: vida y armas alternadas
+    this.supplyT-=dt;
+    if(this.supplyT<=0){ this.supplyT=rnd(11,16); this.dropSupply(); }
     if(this.phase>=2){
       this.larvaT-=dt;
       if(this.larvaT<=0){ this.larvaT=rnd(5,8); const x=Math.random()<.5?6:200; entities.push(new Larva(x,LAIR.ground-12)); acidSplash(x+8,LAIR.ground-2,6); }
@@ -2048,6 +2139,7 @@ class SandQueen extends Entity{
     this.plate.place(QUEEN.core[0],QUEEN.core[1]+oy,40,40); this.plate.hostile=live&&this.phase<3;
     this.core.place(QUEEN.core[0],QUEEN.core[1]+oy,26,26); this.core.hostile=live&&this.phase===3;
     this.shell+=((this.phase>=3?1:0)-this.shell)*Math.min(1,dt*3);
+    if(this.regenT>0)for(const q of this.parts)q.hostile=false;
     for(const s of this.sides){
       if(s.dead){ s.gone=Math.min(1,s.gone+dt*1.2); s.part.hostile=false; }
       else s.part.hostile=live&&this.phase===1;
@@ -2121,6 +2213,7 @@ class SandQueen extends Entity{
     if(this.phase>=1) for(const s of this.sides)this.drawSide(s);
     this.drawHead(QUEEN.x+jx,QUEEN.headTop+oy+br);
     if(this.beam)this.drawBeam();
+    if(this.regenT>0)this.drawRegen();
   }
   drawCore(off){
     const [cx,cy0]=QUEEN.core, cy=cy0+off, img=objImages.qCore, pulse=0.5+0.5*Math.sin(this.t*(this.phase>=3?9:3));
@@ -2196,6 +2289,27 @@ class SandQueen extends Entity{
       ctx.fillStyle=`rgba(255,190,70,${(0.45+0.3*Math.sin(t*6+s.i)+(s.windup>0?0.3:0)).toFixed(2)})`;
       ctx.beginPath(); ctx.arc(ex,ey,2.4,0,Math.PI*2); ctx.fill();
     }
+    ctx.restore();
+  }
+  drawRegen(){
+    // burbuja verde de curacion y parpados cerrados
+    const t=this.t, cx=QUEEN.x, cy=110+this.oy*0.4, rx=96, ry=104, p=0.7+0.3*Math.sin(t*3);
+    ctx.save(); ctx.globalCompositeOperation="lighter";
+    const g=ctx.createRadialGradient(cx,cy,10,cx,cy,rx);
+    g.addColorStop(0,`rgba(120,255,190,${(0.10*p).toFixed(3)})`);
+    g.addColorStop(0.7,`rgba(60,220,150,${(0.16*p).toFixed(3)})`);
+    g.addColorStop(1,"rgba(30,160,110,0)");
+    ctx.fillStyle=g; ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle=`rgba(150,255,200,${(0.5*p).toFixed(2)})`; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.ellipse(cx,cy,rx*0.92,ry*0.92,0,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+    if(blinkOn()){
+      textPx("REGENERANDO",CONFIG.W/2+1,30,1,PAL["0"],"center");
+      textPx("REGENERANDO",CONFIG.W/2,29,1,"#8cffc0","center");
+    }
+    // marcas de sueño
+    ctx.save(); ctx.globalAlpha=0.8;
+    for(let i=0;i<3;i++){ const ph=(t*0.6+i/3)%1; textPx("Z",QUEEN.x-70+ph*26,70-ph*34,1+Math.round(ph*2),"#bff7de","center"); }
     ctx.restore();
   }
   drawBeam(){
@@ -2371,11 +2485,11 @@ function drawQuakeText(){
 }
 class SupplyDrop extends Entity{
   // caja con paracaidas que trae el arma especial del personaje
-  constructor(x){ super(x,-40); this.t=0; }
+  constructor(x,type="power"){ super(x,-40); this.t=0; this.type=type; }
   update(dt){
     this.t+=dt; this.y+=60*dt; this.x+=Math.sin(this.t*2)*12*dt;
     const g=groundYAt(this.x)-10;
-    if(this.y>=g){ this.dead=true; const it=new Item(this.x,g,"power"); it.life=30; entities.push(it); impactPuff(this.x,g+8); SFX.pickup(); }
+    if(this.y>=g){ this.dead=true; const it=new Item(this.x,g,this.type); it.life=30; entities.push(it); impactPuff(this.x,g+8); SFX.pickup(); }
   }
   draw(cam){
     const img=objImages.chute;
@@ -2553,7 +2667,7 @@ class Player extends Entity{
     super(x,y);this.hb={x:6,y:2,w:16,h:29};this.lives=CONFIG.PLAYER.lives;this.grenades=CONFIG.PLAYER.grenadeCount;
     this.special=0;this.rifleAmmo=0;this.fireCd=0;this.knifeCd=0;this.knifeT=0;this.invuln=1;this.facing=1;this.inTank=null;this.crouch=false;
     this.lastStep=-1;this.charIndex=game.charIndex||0;this.throwT=0;this.shield=100;this.shieldOn=false;this.shieldFlash=0;this.hp=CONFIG.PLAYER.maxHp;this.hurtT=0;
-    this.laserAmmo=0;this.rocketAmmo=0;this.rapidT=0;this.shieldBoost=0;this.power=null;this.kills=0;this.superT=0;this.rageT=0;this.burstCd=0;this.lastTap=-9;
+    this.laserAmmo=0;this.rocketAmmo=0;this.rapidT=0;this.shieldBoost=0;this.power=null;this.kills=0;this.superT=0;this.rageT=0;this.bombs=0;this.burstCd=0;this.lastTap=-9;
   }
   // cada impacto quita un porcentaje de la barra de vida; al vaciarse se pierde una vida
   die(dmg=CONFIG.PLAYER.hitDmg){
@@ -2568,7 +2682,7 @@ class Player extends Entity{
     this.hp=CONFIG.PLAYER.maxHp;
     this.lives--;SFX.death();gatlingStop();shake(6,.25);
     for(let i=0;i<8;i++)particles.push(new Particle(this.x+14,this.y+12,rnd(-90,90),rnd(-150,-45),rnd(.35,.8)));
-    this.special=0;this.rifleAmmo=0;this.laserAmmo=0;this.rocketAmmo=0;this.power=null;this.superT=0;this.rageT=0;this.kills=0;this.grenades=CONFIG.PLAYER.grenadeCount;this.shield=100;this.shieldOn=false;
+    this.special=0;this.rifleAmmo=0;this.laserAmmo=0;this.rocketAmmo=0;this.power=null;this.superT=0;this.rageT=0;this.bombs=0;this.kills=0;this.grenades=CONFIG.PLAYER.grenadeCount;this.shield=100;this.shieldOn=false;
     if(this.lives<=0){game.state="GAMEOVER";finishRun(false);return;}
     this.x=game.quake&&!game.quake.done?game.quake.camX+40:Math.max(game.checkpoint,48);this.y=80;this.vx=0;this.vy=0;this.invuln=CONFIG.PLAYER.invulnRespawn;
   }
@@ -2590,7 +2704,7 @@ class Player extends Entity{
     if(heroImages[this.charIndex].weapon==="boomerang"&&hit("s","z")&&!this.shieldOn){
       // doble toque de S: rafaga de boomerangs en 360 grados
       if(game.runTime-this.lastTap<CONFIG.BURST.tap&&this.burstCd<=0){
-        this.burstCd=CONFIG.BURST.cd; this.lastTap=-9; this.throwT=0.3; this.fireCd=0.3; this.skipRelease=true;
+        this.burstCd=this.rageT>0?1.2:CONFIG.BURST.cd; this.lastTap=-9; this.throwT=0.3; this.fireCd=0.3; this.skipRelease=true;
         const mode=this.rageT>0?"rage":this.superT>0?"super":this.power?.kind==="giant"?"giant":false, n=CONFIG.BURST.count+(this.rageT>0?4:0);
         for(let i=0;i<n;i++){ const a=i/n*Math.PI*2-Math.PI/2; entities.push(new Boomerang(this,this.x+14,this.y+12,Math.cos(a),Math.sin(a),mode)); }
         SFX.boomerang(); SFX.charge(); flashScreen(.25); shake(2,.12);
@@ -2704,7 +2818,18 @@ class Player extends Entity{
         casing(this.x+13,this.y+9,this.facing);
       }
     }
-    if((hit("c","l")||gp?.nade)&&this.grenades>0&&heroImages[this.charIndex].weapon!=="boomerang"&&!this.shieldOn){this.grenades--;SFX.grenadePin();SFX.grenadeThrow();entities.push(new Grenade(this.x+14,this.y+10,this.facing));}
+    if((hit("c","l")||gp?.nade)&&!this.shieldOn){
+      if(heroImages[this.charIndex].weapon==="boomerang"){
+        if(this.bombs>0&&this.rageT>0){
+          this.bombs--; this.throwT=0.22; SFX.grenadeThrow(); SFX.charge();
+          entities.push(new EnergyBomb(this.x+14+aim.x*12,this.y+10+aim.y*8,aim.x,aim.y));
+          addLight(this.x+14,this.y+10,40,"255,80,50",.12);
+        }
+      } else if(this.grenades>0){
+        this.grenades--; SFX.grenadePin(); SFX.grenadeThrow();
+        entities.push(new Grenade(this.x+14,this.y+10,this.facing));
+      }
+    }
     if((hit("shift")||gp?.knife)&&this.knifeCd<=0&&!this.shieldOn){
       this.knifeCd=CONFIG.PLAYER.knifeCooldown;this.knifeT=CONFIG.PLAYER.knifeTime;SFX.knife();melee(this);
     }
@@ -2954,8 +3079,8 @@ function pickupItem(i){
   let label=null;
   if(t==="rage"){
     p.rageT=CONFIG.RAGE.time;
-    if(heroImages[p.charIndex].weapon==="boomerang"){ p.superT=Math.max(p.superT,CONFIG.RAGE.time); label="FASE ROJA"; }
-    else label="FURIA ROJA";
+    if(heroImages[p.charIndex].weapon==="boomerang"){ p.superT=Math.max(p.superT,CONFIG.RAGE.time); p.bombs=CONFIG.RAGE.bombs; label="FASE ROJA"; }
+    else { p.grenades=Math.min(9,p.grenades+3); label="FURIA ROJA"; }
     SFX.powerup(); SFX.charge(); flashScreen(.5); shake(4,.3); addLight(i.x,i.y,90,"255,60,40",.5);
     for(let k=0;k<18;k++)particles.push(new Particle(i.x,i.y,rnd(-130,130),rnd(-170,-20),rnd(.3,.8)));
   }
@@ -2968,6 +3093,11 @@ function pickupItem(i){
   else if(t==="grenade")p.grenades=Math.min(9,p.grenades+3);
   else if(t==="rapid"){p.rapidT=10;label="DISPARO RAPIDO";}
   else if(t==="shieldup"){p.shield=100;p.shieldBoost=8;label="ESCUDO TOTAL";}
+  else if(t==="health"||t==="blood"){
+    const cura=t==="blood"?60:40;
+    p.hp=Math.min(CONFIG.PLAYER.maxHp,(p.hp??CONFIG.PLAYER.maxHp)+cura);
+    label="VIDA +"+cura; SFX.powerup(); addLight(i.x,i.y,50,"255,80,80",.25);
+  }
   else if(t==="life"){p.lives=Math.min(9,p.lives+1);p.hp=CONFIG.PLAYER.maxHp;label="+1 VIDA";}
   else game.score+=1000;
   if(["rapid","shieldup","life","laser","rocket"].includes(t)){SFX.powerup();addLight(i.x,i.y,40,ITEM_ICONS[t][3],0.2);} else SFX.pickup();
@@ -3359,6 +3489,11 @@ function update(dt){
   for(const e of entities) if(e.dead&&!e._counted&&(e instanceof Enemy||e instanceof Turret||e instanceof EnemyTank||(e instanceof Mech&&!(e instanceof Egg)))){ e._counted=true; onKill(); }
   entities=entities.filter(e=>!e.dead);particles=particles.filter(p=>!p.dead);mortars=mortars.filter(m=>!m.dead);
 
+  if(game.lair&&player&&player.rageT<=0&&!entities.some(e=>e instanceof Item&&e.type==="rage")){
+    // en la guarida el orbe rojo vuelve a aparecer para poder transformarse otra vez
+    game.orbT=(game.orbT??18)-dt;
+    if(game.orbT<=0){ game.orbT=22; entities.push(Object.assign(new Item(rnd(40,150),LAIR.ground-12,"rage"),{life:1e9})); toast("ORBE ROJO DISPONIBLE"); }
+  }
   if(stormActive()){
     game.stormT=(game.stormT||0)-dt;
     if(game.stormT<=0){ game.stormT=rnd(0.55,1.2); spawnStormBolt(); }
@@ -3765,8 +3900,17 @@ function drawHUD(){
   else drawSprite(SPRITES.item,66,4,2);
   textPx(heavyAmmo>0?("x"+heavyAmmo):"---",86,6,1,heavyAmmo>0?PAL["K"]:PAL["M"]);
 
-  drawSprite(SPRITES.grenade,126,4,3);
-  textPx("x"+player.grenades,142,6,1,PAL["J"]);
+  const kidHero=heroImages[player.charIndex].weapon==="boomerang";
+  if(kidHero){
+    ctx.save(); ctx.globalCompositeOperation="lighter";
+    const g=ctx.createRadialGradient(132,10,0,132,10,7);
+    g.addColorStop(0,"rgba(255,240,220,0.95)"); g.addColorStop(0.45,"rgba(255,70,50,0.85)"); g.addColorStop(1,"rgba(200,20,10,0)");
+    ctx.fillStyle=g; ctx.fillRect(125,3,14,14); ctx.restore();
+    textPx("x"+player.bombs,142,6,1,player.bombs>0?PAL["K"]:PAL["M"]);
+  } else {
+    drawSprite(SPRITES.grenade,126,4,3);
+    textPx("x"+player.grenades,142,6,1,PAL["J"]);
+  }
 
   drawSprite(SPRITES.icon_star,178,3,2);
   textPx("x"+game.hostages,196,6,1,PAL["W"]);
@@ -3837,6 +3981,8 @@ function drawTitle(){
     "TOCA A LOS REHENES PARA LIBERARLOS",
     "MANTEN S Y USA LAS FLECHAS PARA APUNTAR",
     "EL ORBE ROJO DA MAS FUERZA Y RESISTENCIA",
+    "EN FASE ROJA JUAN JOSE LANZA BOMBAS CON C",
+    "EN LA PELEA FINAL CAEN ARMAS Y BOTIQUINES",
     "CAJAS Y REHENES SUELTAN ARMAS Y POWER UPS",
     "CAMINA HASTA EL TANQUE PARA SUBIRTE",
     "JUAN JOSE LANZA SU BOOMERANG CON S",
