@@ -197,13 +197,14 @@ function armLayers(img){
   for(const {a} of img._arms){ const p=new Path2D(); p.arc(a.piv[0],a.piv[1],a.keep??12,0,Math.PI*2); b.save(); b.clip(p); b.drawImage(img,0,0); b.restore(); }
   img._body=body; return true;
 }
-function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
+function aimRotOf(a){ return Math.atan2(a.y,Math.abs(a.x)); }
+function drawCharImg(img,x,y,h,flip,anim=0,moving=false,aimRot=0){
   const sw=img.naturalWidth, sh=img.naturalHeight;
   // padTop: margen transparente arriba (pelo en puntas); h sigue midiendo el cuerpo original
   const pad=img.padTop||0, k=h/(sh-pad), w=sw*k;
-  const rig=img.rig, animate=moving&&rig&&rig.bot;
-  const phase=anim*Math.PI*0.6;
-  const lift=animate?(1-Math.abs(Math.sin(phase)))*2.6:0;
+  const rig=img.rig, animate=(moving||aimRot)&&rig&&rig.bot, mv=moving?1:0;
+  const phase=moving?anim*Math.PI*0.6:0;
+  const lift=animate&&moving?(1-Math.abs(Math.sin(phase)))*2.6:0;
   ctx.save();
   ctx.imageSmoothingEnabled=true;
   ctx.translate(Math.round(x),Math.round(y-lift));
@@ -214,13 +215,13 @@ function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
     const kneeY=rig.pivy+(rig.bot-rig.pivy)*0.5, ankleY=rig.pivy+(rig.bot-rig.pivy)*(rig.ankle||0.84);
     const toX=v=>left+v*k, toY=v=>topY+v*k;
     const hipX=toX(rig.pivx), hipY=toY(rig.pivy);
-    const A=rig.thigh??0.4, K=rig.knee??0.95, F=rig.foot??0.45;
+    const A=(rig.thigh??0.4)*mv, K=(rig.knee??0.95)*mv, F=(rig.foot??0.45)*mv;
     // cuerpo inclinado hacia delante con un leve vaiven de cadera dos veces por zancada
-    ctx.translate(hipX,hipY); ctx.rotate((rig.lean??0.07)+Math.sin(phase*2)*0.022); ctx.translate(-hipX,-hipY);
+    ctx.translate(hipX,hipY); ctx.rotate(((rig.lean??0.07)+Math.sin(phase*2)*0.022)*mv); ctx.translate(-hipX,-hipY);
     const arms=rig.arms&&armLayers(img)?img._arms:null, src=arms?img._body:img;
     // brazos en contrafase con la pierna del mismo lado; "wave" = agitar los brazos en alto
     const drawArm=(L,i)=>{
-      const a=L.a, rot=a.wave?Math.sin(phase*2+i*1.3)*a.amp:(a.back?-1:1)*Math.sin(phase)*a.amp;
+      const a=L.a, rot=(a.wave?Math.sin(phase*2+i*1.3)*a.amp:(a.back?-1:1)*Math.sin(phase)*a.amp)+(!a.back&&!a.wave?aimRot*0.7:0);
       const X0=toX(a.piv[0]), Y0=toY(a.piv[1]);
       ctx.save(); ctx.translate(X0,Y0); ctx.rotate(rot); ctx.translate(-X0,-Y0);
       ctx.drawImage(L.c,left,topY,w,sh*k); ctx.restore();
@@ -249,9 +250,12 @@ function drawCharImg(img,x,y,h,flip,anim=0,moving=false){
     }
     // el torso baja 8 px de mas para tapar la cuña que abren los muslos en la entrepierna
     const tb=Math.min(sh,rig.torsobot+8);
+    // al apuntar el torso se inclina hacia el objetivo (30%) y el brazo completa el giro
+    ctx.save(); if(aimRot){ ctx.translate(hipX,hipY); ctx.rotate(aimRot*0.3); ctx.translate(-hipX,-hipY); }
     if(arms) arms.forEach((L,i)=>{ if(L.a.back)drawArm(L,i); });
     ctx.drawImage(src,0,0,sw,tb,left,topY,w,tb*k);
     if(arms) arms.forEach((L,i)=>{ if(!L.a.back)drawArm(L,i); });
+    ctx.restore();
   } else {
     ctx.drawImage(img,left,topY,w,sh*k);
   }
@@ -1747,7 +1751,7 @@ function drawDescent(){
     ctx.fillStyle="rgba(0,0,0,.6)"; ctx.fillRect(0,196,CONFIG.W,26);
     textPx("REINA DE LA ARENA",CONFIG.W/2+1,199,2,PAL["G"],"center");
     textPx("REINA DE LA ARENA",CONFIG.W/2,198,2,PAL["K"],"center");
-    textPx("MANTEN D PARA DISPARAR HACIA ARRIBA",CONFIG.W/2,213,1,PAL["7"],"center");
+    textPx("MANTEN S Y USA LAS FLECHAS PARA APUNTAR",CONFIG.W/2,213,1,PAL["7"],"center");
     ctx.restore();
   }
 }
@@ -2272,7 +2276,8 @@ class Player extends Entity{
     const gp=gamepadState();
     const L=down("arrowleft")||gp?.l,R=down("arrowright")||gp?.r,U=down("arrowup")||gp?.u,D=down("arrowdown")||gp?.d;
     const move=(R?1:0)-(L?1:0);if(move)this.facing=move;
-    this.crouch=D&&this.onGround&&!move;
+    const firing=!!(down("s","z")||gp?.fire);
+    this.crouch=D&&this.onGround&&!move&&!firing;
     this.hb=this.crouch?{x:6,y:14,w:16,h:17}:{x:6,y:2,w:16,h:29};
     // escudo (A): consume energia mientras se sostiene, se recarga al soltarlo
     if(down("a")&&this.shield>0&&(this.shieldOn||this.shield>=CONFIG.SHIELD.minRaise)){
@@ -2298,8 +2303,9 @@ class Player extends Entity{
     const target=move*CONFIG.PLAYER.run, acc=this.onGround?CONFIG.PLAYER.accel:CONFIG.PLAYER.airAccel;
     if(move&&!this.shieldOn) this.vx += clamp(target-this.vx,-acc*dt,acc*dt);
     else if(this.onGround) this.vx += clamp(-this.vx,-CONFIG.PLAYER.friction*dt,CONFIG.PLAYER.friction*dt);
-    if((hit("arrowup","x")||gp?.jump)&&this.onGround&&!this.crouch&&!this.shieldOn){this.vy=-CONFIG.PLAYER.jump;SFX.jump();}
-    if(!(down("arrowup","x")||gp?.jump)&&this.vy<0)this.vy+=CONFIG.PLAYER.gravity*CONFIG.PLAYER.jumpCut*dt;
+    // con S mantenido, arriba apunta en vez de saltar; X o espacio siempre saltan
+    if(((hit("arrowup")&&!firing)||hit("x"," ")||gp?.jump)&&this.onGround&&!this.crouch&&!this.shieldOn){this.vy=-CONFIG.PLAYER.jump;SFX.jump();}
+    if(!(down("arrowup","x"," ")||gp?.jump)&&this.vy<0)this.vy+=CONFIG.PLAYER.gravity*CONFIG.PLAYER.jumpCut*dt;
     this.vy=clamp(this.vy+CONFIG.PLAYER.gravity*dt,-999,CONFIG.PLAYER.maxFall);
     collideWorld(this,dt);
     this.x=clamp(this.x,0,game.lair?LAIR.maxX:WORLD_W-28);
@@ -2310,7 +2316,11 @@ class Player extends Entity{
       this.lastStep=sf;
     }
 
-    const aim=aimVector(this.facing,L,R,down("d")||gp?.aimUp,D&&!this.onGround);
+    // 8 direcciones: con S mantenido las flechas apuntan (D tambien apunta arriba)
+    const aimU=!!(down("d")||gp?.aimUp||(firing&&U)), aimD=!aimU&&(firing?!!D:!!(D&&!this.onGround));
+    const gd=aimD&&this.onGround&&!L&&!R;
+    const aim=aimVector(this.facing,L||(gd&&this.facing<0),R||(gd&&this.facing>0),aimU,aimD);
+    this.aimVec=aim;
     {
       // rafaga: con balas normales, mantener S suena la ametralladora en bucle; toques sueltos usan disparo simple
       const bulletGun=heroImages[this.charIndex].weapon!=="boomerang"&&!this.laserAmmo&&!this.rocketAmmo&&!this.special&&(!this.power||this.power.kind==="minigun");
@@ -2390,21 +2400,23 @@ class Player extends Entity{
   // punto de salida del disparo: boca del arma del sprite visible, con la inclinacion del rig al correr
   shotSfx(){ if(this.holdT>0.22)gatlingStart(); else SFX.gunshot(); }
   muzzlePoint(aim){
-    const hc=heroImages[this.charIndex], moving=Math.abs(this.vx)>8;
+    const hc=heroImages[this.charIndex], moving=Math.abs(this.vx)>8, aiming=aim.y!==0;
     if(!hc.muzzle) return [this.x+14+aim.x*12,this.y+12+aim.y*7];
-    const img=moving||!hc.idle?hc.run:hc.idle, m=(img===hc.idle&&hc.muzzleIdle)||hc.muzzle;
+    const img=moving||aiming||!hc.idle?hc.run:hc.idle, m=(img===hc.idle&&hc.muzzleIdle)||hc.muzzle;
     const h=hc.h||44, k=h/300, f=this.facing, cx=this.x+14, foot=this.y+32;
-    let dx=(m[0]-150)*k, dy=-h+m[1]*k;
+    let mx=m[0], my=m[1];
+    // al apuntar, la boca gira con el brazo del arma alrededor de su pivote
+    const arm=aiming&&img.rig&&img.rig.arms&&img.rig.arms.find(q=>!q.back&&!q.wave);
+    const rot=(x,y,px,py,r)=>[px+(x-px)*Math.cos(r)-(y-py)*Math.sin(r),py+(x-px)*Math.sin(r)+(y-py)*Math.cos(r)];
+    if(arm){ const r=aimRotOf(aim); [mx,my]=rot(mx,my,arm.piv[0],arm.piv[1],r*0.7); [mx,my]=rot(mx,my,img.rig.pivx,img.rig.pivy,r*0.3); }
+    let dx=(mx-150)*k, dy=-h+my*k;
     if(moving&&img.rig){
       const r=img.rig, ph=this.anim*Math.PI*0.6, lean=(r.lean??0.07)+Math.sin(ph*2)*0.022;
       const hx=(r.pivx-150)*k, hy=-h+r.pivy*k, rx=dx-hx, ry=dy-hy;
       dx=hx+rx*Math.cos(lean)-ry*Math.sin(lean); dy=hy+rx*Math.sin(lean)+ry*Math.cos(lean);
       dy-=(1-Math.abs(Math.sin(ph)))*2.6;
     }
-    let x=cx+f*dx, y=foot+dy;
-    // apuntando arriba o abajo: la bala nace un poco hacia esa direccion desde la boca
-    if(aim.y!==0){ x=cx+(aim.x!==0?f*dx*0.8:f*4); y=aim.y<0?foot+dy-6:foot+dy+8; }
-    return [x,y];
+    return [cx+f*dx,foot+dy];
   }
   throwBoomerang(aim,power){
     const limit=this.rapidT>0||this.superT>0||this.power?.kind==="giant"?3:2;
@@ -2421,10 +2433,11 @@ class Player extends Entity{
     const hc=heroImages[this.charIndex];
     const moving=Math.abs(this.vx)>8;
     const sup=this.superT>0&&hc.superRun&&imgReady(hc.superRun), pick=(a,b)=>sup&&a&&imgReady(a)?a:b;
-    const charImg=!this.crouch&&hc&&(this.throwT>0&&hc.throwImg?pick(hc.superThrow,hc.throwImg):(moving?pick(hc.superRun,hc.run):pick(hc.superIdle,hc.idle||hc.run)));
+    const aiming=!!(hc.muzzle&&this.aimVec&&this.aimVec.y!==0&&!this.crouch);
+    const charImg=!this.crouch&&hc&&(this.throwT>0&&hc.throwImg?pick(hc.superThrow,hc.throwImg):(moving||aiming?pick(hc.superRun,hc.run):pick(hc.superIdle,hc.idle||hc.run)));
     if(this.superT>0)drawSuperAura(this,cam,false);
     if(charImg&&imgReady(charImg)){
-      drawCharImg(charImg,this.x-cam.x+14,this.y+32,hc.h||44,this.facing<0,this.anim,moving);
+      drawCharImg(charImg,this.x-cam.x+14,this.y+32,hc.h||44,this.facing<0,this.anim,moving,aiming?aimRotOf(this.aimVec):0);
     } else {
       let sp=SPRITES.player_idle;
       if(this.crouch)sp=SPRITES.player_crouch;
@@ -3290,8 +3303,8 @@ function drawTitle(){
   textPx("CONTROLES",CONFIG.W/2+1,py+6,2,PAL["1"],"center");
   textPx("CONTROLES",CONFIG.W/2,py+5,2,PAL["K"],"center");
   const rows=[
-    [[["<"],[">"]],"MOVERSE",   [["^"]],"SALTAR"],
-    [[["S"]],"DISPARAR",        [["D"]],"APUNTAR ARRIBA"],
+    [[["<"],[">"]],"MOVERSE",   [["^"],["X"]],"SALTAR"],
+    [[["S"]],"DISPARAR",        [["S"],["^"],["v"]],"APUNTAR"],
     [[["A"]],"ESCUDO",          [["v"]],"AGACHARSE"],
     [[["C"]],"GRANADA",         [["SHIFT"]],"CUCHILLO"],
     [[["P"]],"PAUSA",           null,null]
@@ -3307,7 +3320,7 @@ function drawTitle(){
   });
   const tips=[
     "TOCA A LOS REHENES PARA LIBERARLOS",
-    "MANTEN D PARA DISPARAR HACIA ARRIBA",
+    "MANTEN S Y USA LAS FLECHAS PARA APUNTAR",
     "CAJAS Y REHENES SUELTAN ARMAS Y POWER UPS",
     "CAMINA HASTA EL TANQUE PARA SUBIRTE",
     "JUAN JOSE LANZA SU BOOMERANG CON S",
