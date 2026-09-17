@@ -26,7 +26,7 @@ const CONFIG = {
   PLAYER:{
     run:100, accel:800, airAccel:200, friction:900,
     jump:220, jumpCut:0.48, gravity:800, maxFall:400,
-    lives:3, invulnRespawn:1.15, fireRate:0.115, knifeTime:0.18,
+    lives:3, maxHp:100, hitDmg:20, hitInvuln:0.7, invulnRespawn:1.15, fireRate:0.115, knifeTime:0.18,
     knifeCooldown:0.34, grenadeCount:5, grenadeSpeed:145
   },
   PISTOL:{speed:245, damage:1, life:1.25},
@@ -1029,6 +1029,7 @@ class Particle extends Entity{
   draw(cam){
     const a=clamp(this.life/this.max,0,1);
     if(this.type==="smoke") drawSprite(SPRITES.smoke,this.x-cam.x-6,this.y-6,1,false,a);
+    else if(this.type==="blood"){ ctx.save();ctx.globalAlpha=a;ctx.fillStyle=Math.random()<.5?"#b3141b":"#7a0b10";ctx.fillRect(Math.round(this.x-cam.x),Math.round(this.y),2,2);ctx.restore(); }
     else if(this.type==="rock"){ ctx.save();ctx.globalAlpha=a;ctx.fillStyle="#6b5037";ctx.fillRect(Math.round(this.x-cam.x),Math.round(this.y),2,2);ctx.restore(); }
     else if(this.type==="acid"){ ctx.save();ctx.globalAlpha=a;ctx.fillStyle=Math.random()<.5?"#b8ff5a":"#6fe03a";ctx.fillRect(Math.round(this.x-cam.x),Math.round(this.y),2,2);ctx.restore(); }
     else if(this.type==="casing"){
@@ -2263,11 +2264,20 @@ class Player extends Entity{
   constructor(x,y){
     super(x,y);this.hb={x:6,y:2,w:16,h:29};this.lives=CONFIG.PLAYER.lives;this.grenades=CONFIG.PLAYER.grenadeCount;
     this.special=0;this.rifleAmmo=0;this.fireCd=0;this.knifeCd=0;this.knifeT=0;this.invuln=1;this.facing=1;this.inTank=null;this.crouch=false;
-    this.lastStep=-1;this.charIndex=game.charIndex||0;this.throwT=0;this.shield=100;this.shieldOn=false;this.shieldFlash=0;
+    this.lastStep=-1;this.charIndex=game.charIndex||0;this.throwT=0;this.shield=100;this.shieldOn=false;this.shieldFlash=0;this.hp=CONFIG.PLAYER.maxHp;this.hurtT=0;
     this.laserAmmo=0;this.rocketAmmo=0;this.rapidT=0;this.shieldBoost=0;this.power=null;this.kills=0;this.superT=0;this.burstCd=0;this.lastTap=-9;
   }
-  die(){
+  // cada impacto quita un porcentaje de la barra de vida; al vaciarse se pierde una vida
+  die(dmg=CONFIG.PLAYER.hitDmg){
     if(this.invuln>0||game.state!=="PLAY"||this.inTank)return;
+    this.hp=(this.hp??CONFIG.PLAYER.maxHp)-dmg; this.hurtT=0.25;
+    for(let i=0;i<6;i++)particles.push(new Particle(this.x+14,this.y+12,rnd(-70,70),rnd(-110,-20),rnd(.3,.6),"blood"));
+    if(this.hp>0){ this.invuln=CONFIG.PLAYER.hitInvuln; tone(170,0.14,"sawtooth",0.16,-90); noise(0.06,0.08); shake(2,.1); return; }
+    this.loseLife();
+  }
+  loseLife(){
+    if(game.state!=="PLAY"||this.inTank)return;
+    this.hp=CONFIG.PLAYER.maxHp;
     this.lives--;SFX.death();gatlingStop();shake(6,.25);
     for(let i=0;i<8;i++)particles.push(new Particle(this.x+14,this.y+12,rnd(-90,90),rnd(-150,-45),rnd(.35,.8)));
     this.special=0;this.rifleAmmo=0;this.laserAmmo=0;this.rocketAmmo=0;this.power=null;this.superT=0;this.kills=0;this.grenades=CONFIG.PLAYER.grenadeCount;this.shield=100;this.shieldOn=false;
@@ -2302,7 +2312,7 @@ class Player extends Entity{
     }
     if(this.superT>0){ this.superT=Math.max(0,this.superT-dt); if(Math.random()<dt*10)addLight(this.x+14,this.y+12,34,"255,210,90",.08); }
     if(this.power&&this.power.time!==undefined){ this.power.time-=dt; if(this.power.time<=0)this.power=null; }
-    this.shieldFlash-=dt; this.shieldBoost-=dt; this.rapidT-=dt; if(this.rapidT>0)this.fireCd-=dt;
+    this.hurtT-=dt; this.shieldFlash-=dt; this.shieldBoost-=dt; this.rapidT-=dt; if(this.rapidT>0)this.fireCd-=dt;
     const target=move*CONFIG.PLAYER.run, acc=this.onGround?CONFIG.PLAYER.accel:CONFIG.PLAYER.airAccel;
     if(move&&!this.shieldOn) this.vx += clamp(target-this.vx,-acc*dt,acc*dt);
     else if(this.onGround) this.vx += clamp(-this.vx,-CONFIG.PLAYER.friction*dt,CONFIG.PLAYER.friction*dt);
@@ -2398,7 +2408,7 @@ class Player extends Entity{
     if((hit("shift")||gp?.knife)&&this.knifeCd<=0&&!this.shieldOn){
       this.knifeCd=CONFIG.PLAYER.knifeCooldown;this.knifeT=CONFIG.PLAYER.knifeTime;SFX.knife();melee(this);
     }
-    if(this.y>CONFIG.H+45)this.die();
+    if(this.y>CONFIG.H+45)this.loseLife();
   }
   // punto de salida del disparo: boca del arma del sprite visible, con la inclinacion del rig al correr
   shotSfx(){ if(this.holdT>0.22)gatlingStart(); else SFX.gunshot(); }
@@ -2440,7 +2450,9 @@ class Player extends Entity{
     const charImg=!this.crouch&&hc&&(this.throwT>0&&hc.throwImg?pick(hc.superThrow,hc.throwImg):(moving||aiming?pick(hc.superRun,hc.run):pick(hc.superIdle,hc.idle||hc.run)));
     if(this.superT>0)drawSuperAura(this,cam,false);
     if(charImg&&imgReady(charImg)){
+      if(this.hurtT>0)ctx.filter="sepia(1) saturate(6) hue-rotate(-45deg) brightness(0.9)";
       drawCharImg(charImg,this.x-cam.x+14,this.y+32,hc.h||44,this.facing<0,this.anim,moving,aiming?aimRotOf(this.aimVec):0);
+      ctx.filter="none";
     } else {
       let sp=SPRITES.player_idle;
       if(this.crouch)sp=SPRITES.player_crouch;
@@ -2635,7 +2647,7 @@ function pickupItem(i){
   else if(t==="grenade")p.grenades=Math.min(9,p.grenades+3);
   else if(t==="rapid"){p.rapidT=10;label="DISPARO RAPIDO";}
   else if(t==="shieldup"){p.shield=100;p.shieldBoost=8;label="ESCUDO TOTAL";}
-  else if(t==="life"){p.lives=Math.min(9,p.lives+1);label="+1 VIDA";}
+  else if(t==="life"){p.lives=Math.min(9,p.lives+1);p.hp=CONFIG.PLAYER.maxHp;label="+1 VIDA";}
   else game.score+=1000;
   if(["rapid","shieldup","life","laser","rocket"].includes(t)){SFX.powerup();addLight(i.x,i.y,40,ITEM_ICONS[t][3],0.2);} else SFX.pickup();
   if(label)entities.push(new ScorePopup(p.x+14,p.y-14,label));
@@ -3248,6 +3260,14 @@ function drawHUD(){
   for(const dx of [58,118,172]) ctx.fillRect(dx,3,1,barH-6);
 
   drawSprite(SPRITES.icon_medal,4,3,2);
+  {
+    // barra de vida junto a las vidas
+    const pct=clamp((player.hp??CONFIG.PLAYER.maxHp)/CONFIG.PLAYER.maxHp,0,1), bx=22, by=13, bw=32;
+    ctx.fillStyle=PAL["0"]; ctx.fillRect(bx-1,by-1,bw+2,5);
+    ctx.fillStyle=pct<=0.2&&blinkOn()?"#ffffff":pct>0.6?"#4fd35a":pct>0.3?"#f0c040":"#e0302a";
+    ctx.fillRect(bx,by,Math.round(bw*pct),3);
+    ctx.fillStyle=PAL["0"]; for(let i=1;i<5;i++)ctx.fillRect(bx+Math.round(bw*i/5),by,1,3);
+  }
   textPx("x"+Math.max(0,player.lives),22,6,1,PAL["7"]);
 
   const pw=player.power;
