@@ -156,12 +156,16 @@ const enemyRifleImg = loadImg("assets/sprite-enemy_rifle.png",{legtop:143,torsob
 // boca del arma en px del PNG (sprite de correr y, si existe, el de quieto)
 heroImages[0].muzzle=[262,84]; heroImages[0].muzzleIdle=[292,60];
 heroImages[1].muzzle=[262,64]; heroImages[2].muzzle=[262,58];
+heroImages[3].rageRun=loadImg("assets/sprite-kid_run_rage.png");
+heroImages[3].rageIdle=loadImg("assets/sprite-kid_idle_rage.png");
+heroImages[3].rageThrow=loadImg("assets/sprite-kid_throw_rage.png");
 heroImages[3].transform=true;
 heroImages[3].frontSuper=Object.assign(loadImg("assets/sprite-kid_front_super.png"),{padTop:40});
 heroImages[3].cheerSuper=Object.assign(loadImg("assets/sprite-kid_cheer_super.png"),{padTop:40});
 // tiempos de la transformacion en la seleccion (s): destello, celebracion, fin
 const TRANSFORM={flash:0.6, cheer:1.15, end:2.3};
-for(const n of ["superRun","superIdle","superThrow"])heroImages[3][n].padTop=40;
+for(const n of ["superRun","superIdle","superThrow","rageRun","rageIdle","rageThrow"])heroImages[3][n].padTop=40;
+heroImages[3].rageRun.rig=shiftRig(heroImages[3].run.rig,40);
 heroImages[3].superRun.rig=shiftRig(heroImages[3].run.rig,40);
 const enemyRobotImg = loadImg("assets/sprite-enemy_robot.png",{legtop:172,torsobot:192,pivx:128,pivy:180,split:128,bot:291,thigh:0.38,knee:0.8});
 const enemyHeavyImg = loadImg("assets/sprite-enemy_heavybot.png",{legtop:170,torsobot:190,pivx:130,pivy:180,split:130,bot:282,thigh:0.26,knee:0.55,foot:0.25,lean:0.03});
@@ -947,7 +951,7 @@ function noise(dur=0.08,vol=0.2){
   s.connect(g); g.connect(master); s.start();
 }
 const sfxClips={};
-for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm","yell","boomerang","cannon","bark","bark2","laser","rocket","powerup","stomp","drone","mechdie","roar","acid","splat","charge","beam","screech","quake","gunshot","loading","droneshot","grenadepin","grenadebounce","grenadethrow"]){
+for(const n of ["shot","shotgun","boom","jump","pickup","knife","death","rescue","alarm","yell","boomerang","cannon","bark","bark2","laser","rocket","powerup","stomp","drone","mechdie","roar","acid","splat","charge","beam","screech","quake","gunshot","loading","droneshot","grenadepin","grenadebounce","grenadethrow","thunder"]){
   const a=new Audio("assets/sfx/"+n+".mp3"); a.preload="auto"; sfxClips[n]=a;
 }
 function playClip(name,vol){
@@ -971,6 +975,7 @@ const SFX={
   droneShot(){playClip("droneshot",0.5);},
   grenadePin(){playClip("grenadepin",0.7);},
   grenadeThrow(){playClip("grenadethrow",0.6);},
+  thunder(){playClip("thunder",0.55);},
   grenadeBounce(){playClip("grenadebounce",0.65);},
   shot(){playClip("shot",0.5);},
   shotgun(){playClip("shotgun",0.6);},
@@ -2380,6 +2385,48 @@ class SupplyDrop extends Entity{
     ctx.restore();
   }
 }
+// Tormenta de la fase roja de Juan Jose: cielo oscuro y rayos que caen del cielo
+function stormActive(){ return !!(player&&player.rageT>0&&heroImages[player.charIndex]?.weapon==="boomerang"); }
+function drawStormTint(){
+  const f=game.stormFlash||0;
+  ctx.save();
+  ctx.fillStyle=`rgba(16,5,32,${(0.48-f*0.4).toFixed(3)})`; ctx.fillRect(0,0,CONFIG.W,CONFIG.H);
+  if(f>0){ ctx.globalCompositeOperation="lighter"; ctx.fillStyle=`rgba(255,140,120,${(f*0.25).toFixed(3)})`; ctx.fillRect(0,0,CONFIG.W,CONFIG.H); }
+  ctx.restore();
+}
+function spawnStormBolt(){
+  // cae cerca de un enemigo en pantalla; si no hay, cerca del jugador
+  const foes=entities.filter(e=>!e.dead&&isHostile(e)&&Math.abs(e.x-cam.x-CONFIG.W/2)<CONFIG.W/2);
+  const x=foes.length?foes[Math.floor(Math.random()*foes.length)].x+14:player.x+14+rnd(-120,120);
+  entities.push(new StormBolt(clamp(x,cam.x+10,cam.x+CONFIG.W-10)));
+}
+class StormBolt extends Entity{
+  constructor(x){
+    super(x,0); this.t=0; this.life=0.42; this.seed=Math.random()*999;
+    const gy=groundYAt(x);
+    game.stormFlash=1; shake(3,.14); SFX.thunder(); addLight(x,gy-20,90,"255,150,120",.35);
+    for(const e of entities) if(!e.dead&&isHostile(e)&&Math.abs(e.x+(e.hb?e.hb.x+e.hb.w/2:0)-x)<24&&e.hurt) e.hurt(4,"explosion",sign(e.x-x)||1);
+    for(let i=0;i<10;i++)particles.push(new Particle(x+rnd(-8,8),gy-2,rnd(-70,70),rnd(-130,-30),rnd(.3,.7)));
+  }
+  update(dt){ this.t+=dt; if(this.t>=this.life)this.dead=true; }
+  draw(cam){
+    const a=Math.max(0,1-this.t/this.life), x=this.x-cam.x, gy=groundYAt(this.x);
+    ctx.save(); ctx.globalCompositeOperation="lighter"; ctx.lineCap="round"; ctx.lineJoin="round";
+    for(const [col,wid] of [["rgba(255,80,60,"+(0.55*a).toFixed(2)+")",6],["rgba(255,255,255,"+(0.95*a).toFixed(2)+")",2]]){
+      ctx.strokeStyle=col; ctx.lineWidth=wid; ctx.beginPath();
+      let px=x, py=-6;
+      ctx.moveTo(px,py);
+      for(let i=1;i<=7;i++){
+        const p=i/7; px=x+(hash01(this.seed+i)-0.5)*22*(1-p*0.4); py=-6+(gy+6)*p;
+        ctx.lineTo(px,py);
+      }
+      ctx.stroke();
+    }
+    ctx.fillStyle=`rgba(255,200,170,${(0.5*a).toFixed(2)})`;
+    ctx.beginPath(); ctx.ellipse(x,gy,16*a,4*a,0,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+}
 class Turret extends Entity{
   constructor(x,y){super(x,y);this.hp=CONFIG.TURRET.hp;this.cool=rnd(.2,1);this.hb={x:2,y:4,w:28,h:20};}
   hurt(d,kind="shot"){this.hp-=d;this.flash=0.07; if(this.hp<=0){this.dead=true;game.score+=500;explode(this.x+16,this.y+12,34,2,"player");}}
@@ -2699,9 +2746,15 @@ class Player extends Entity{
     const hc=heroImages[this.charIndex];
     const moving=Math.abs(this.vx)>8;
     const sup=this.superT>0&&hc.superRun&&imgReady(hc.superRun), red=this.rageT>0&&hc.transform;
-    const pick=(a,b)=>{ const im=sup&&a&&imgReady(a)?a:b; if(!red||!im||!imgReady(im))return im; const rv=redVariant(im); return imgReady(rv)?rv:im; };
+    // fase roja: sprite propio si ya cargo; si no, se recolorea el rubio
+    const pick=(rage,a,b)=>{
+      if(red&&rage&&imgReady(rage))return rage;
+      const im=sup&&a&&imgReady(a)?a:b;
+      if(!red||!im||!imgReady(im))return im;
+      const rv=redVariant(im); return imgReady(rv)?rv:im;
+    };
     const aiming=!!(hc.muzzle&&this.aimVec&&this.aimVec.y!==0&&!this.crouch);
-    const charImg=!this.crouch&&hc&&(this.throwT>0&&hc.throwImg?pick(hc.superThrow,hc.throwImg):(moving||aiming?pick(hc.superRun,hc.run):pick(hc.superIdle,hc.idle||hc.run)));
+    const charImg=!this.crouch&&hc&&(this.throwT>0&&hc.throwImg?pick(hc.rageThrow,hc.superThrow,hc.throwImg):(moving||aiming?pick(hc.rageRun,hc.superRun,hc.run):pick(hc.rageIdle,hc.superIdle,hc.idle||hc.run)));
     if(this.superT>0||this.rageT>0)drawSuperAura(this,cam,false);
     if(charImg&&imgReady(charImg)){
       if(this.hurtT>0)ctx.filter="sepia(1) saturate(6) hue-rotate(-45deg) brightness(0.9)";
@@ -3229,6 +3282,7 @@ function update(dt){
   musicTick(dt);
   if(game.state!=="PLAY"||game.paused)gatlingStop();
   if(game.toast){ game.toast.t-=dt; if(game.toast.t<=0)game.toast=null; }
+  game.stormFlash=Math.max(0,(game.stormFlash||0)-dt*3.5);
   if(game.inputLock>0){ game.inputLock-=dt; clearPressed(); }
   loopClip("ambience",!game.paused,game.state==="PLAY"?(game.lair?0.12:0.2):0.08);
   updateWind(dt);
@@ -3305,6 +3359,10 @@ function update(dt){
   for(const e of entities) if(e.dead&&!e._counted&&(e instanceof Enemy||e instanceof Turret||e instanceof EnemyTank||(e instanceof Mech&&!(e instanceof Egg)))){ e._counted=true; onKill(); }
   entities=entities.filter(e=>!e.dead);particles=particles.filter(p=>!p.dead);mortars=mortars.filter(m=>!m.dead);
 
+  if(stormActive()){
+    game.stormT=(game.stormT||0)-dt;
+    if(game.stormT<=0){ game.stormT=rnd(0.55,1.2); spawnStormBolt(); }
+  } else game.stormT=0;
   updateDescent(dt);
   if(!game.lair){
   if(!game.quake&&player.x>QUAKE.x)startQuake();
@@ -3628,6 +3686,7 @@ function render(){
   ctx.translate(Math.round(cam.sx),Math.round(cam.sy));
   if(game.lair&&game.state!=="TITLE"){ drawLairBg(); drawGround(); }
   else { drawSky();drawMidground();drawFarPalms();drawQuakeBuildings();drawForeground();drawQuakeFx(); }
+  if(stormActive())drawStormTint();
   for(const m of mortars)m.draw(cam);
   // Orden simple por y
   const renderList=entities.slice().sort((a,b)=>a.y-b.y);
