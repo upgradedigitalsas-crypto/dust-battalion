@@ -1746,10 +1746,14 @@ class Enemy extends Entity{
   constructor(x,y,type="runner"){
     super(x,y);this.type=type;this.hp=type==="rifle"?2:1;this.hb={x:5,y:2,w:18,h:29};
     this.cool=rnd(.2,1.0);this.react=0;this.deathType="shot";this.seen=false;this.detectT=0;
+    this.covered=false;this.coverX=null;this.peek=0;this.coverT=0;this.dodgeCd=rnd(.5,1.5);this.rank=0;this.burst=0;
   }
   hurt(d,kind="shot",from=1){
     if(this.dead)return;
+    // agachado tras un parapeto: los disparos rasantes rebotan
+    if(this.covered&&this.peek<=0&&kind==="shot"&&Math.random()<0.7){ impactPuff(this.x+14,this.y+20); return; }
     this.hp-=d;this.react=.11;this.vx=-from*55;this.state="react";
+    this.covered=false;this.coverX=null;
     if(this.hp<=0){this.deathType=kind;this.kill();}
   }
   kill(){
@@ -1770,13 +1774,55 @@ class Enemy extends Entity{
       if(this.detectT>0){
         this.detectT-=dt;this.vx=0;
       } else if(this.type==="runner"){
+        // corredor: se acerca en zigzag, salta obstaculos y esquiva disparos
         this.state=ad<28?"attack":"approach";
-        if(ad>=28)this.vx=sign(dx)*CONFIG.ENEMY.speed;
-        else {this.vx=0;if(this.cool<=0){this.cool=.9; enemyMelee(this);}}
+        if(ad>=28){
+          const dir=sign(dx);
+          this.vx=dir*CONFIG.ENEMY.speed*(1+0.25*Math.sin(this.anim*3));
+          aiJumpObstacle(this,dir);
+          this.dodgeCd-=dt;
+          if(this.dodgeCd<=0&&this.onGround&&incomingShot(this,0.3)){ this.dodgeCd=rnd(1.1,2); this.vy=-170; }
+        } else {this.vx=0;if(this.cool<=0){this.cool=.9; enemyMelee(this);}}
       } else {
-        if(ad>112){this.state="approach";this.vx=sign(dx)*36;}
-        else if(ad<68){this.state="cover";this.vx=-sign(dx)*34;}
-        else {this.state="attack";this.vx=0;if(this.cool<=0){this.cool=CONFIG.ENEMY.rifleRate+rnd(-.2,.2);enemyShoot(this);}}
+        // fusilero: busca parapeto, asoma para disparar en rafaga y se reposiciona
+        const dir=sign(dx);
+        this.dodgeCd-=dt; this.coverT-=dt;
+        if(this.dodgeCd<=0&&this.onGround&&!this.covered&&incomingShot(this,0.32)){ this.dodgeCd=rnd(1.2,2.2); this.vy=-165; this.vx=-dir*40; }
+        if(this.coverX===null&&!this.covered&&this.coverT<=0){
+          const c=coverSpotNear(this.x+14,player.x+14,160);
+          if(c!==null&&ad>70){ this.coverX=c-dir*12; this.coverT=6; }
+        }
+        if(this.covered){
+          this.vx=0; this.peek-=dt;
+          if(this.peek<=-1.1&&this.rank<2){ this.peek=0.75; this.burst=2; this.cool=0; }
+          if(this.peek>0){
+            this.cool-=dt;
+            if(this.cool<=0&&this.burst>0){ this.burst--; this.cool=0.22; enemyShoot(this); }
+          }
+          if(ad<52||this.coverT<=0){ this.covered=false; this.coverX=null; this.coverT=3; this.state="approach"; }
+          this.state=this.peek>0?"attack":"cover";
+        } else if(this.coverX!==null){
+          this.state="cover";
+          const d=this.coverX-this.x;
+          if(Math.abs(d)<6){ this.covered=true; this.peek=-0.5; this.vx=0; }
+          else { this.vx=sign(d)*46; aiJumpObstacle(this,sign(d)); }
+        } else if(this.rank>=2){
+          // espera su turno: mantiene distancia y flanquea
+          this.state="approach";
+          this.vx=(ad>150?dir:ad<110?-dir:0)*32;
+          aiJumpObstacle(this,sign(this.vx));
+        } else {
+          if(ad>112){this.state="approach";this.vx=dir*36;aiJumpObstacle(this,dir);}
+          else if(ad<68){this.state="cover";this.vx=-dir*34;aiJumpObstacle(this,-dir);}
+          else {
+            this.state="attack";this.vx=0;
+            if(this.cool<=0){
+              if(this.burst<=0){ this.burst=2; this.cool=0; }
+              this.burst--; this.cool=this.burst>0?0.22:CONFIG.ENEMY.rifleRate+rnd(-.2,.2);
+              enemyShoot(this);
+            }
+          }
+        }
       }
     }
     this.flip=dx<0;this.vy+=CONFIG.PLAYER.gravity*dt;collideWorld(this,dt);
@@ -1784,7 +1830,7 @@ class Enemy extends Entity{
   draw(cam){
     const eImg=this.type==="rifle"?enemyRifleImg:enemyRunnerImg;
     if(imgReady(eImg)){
-      const moving=Math.abs(this.vx)>4, breathe=moving?0:Math.sin(performance.now()/320+this.id)*0.6;
+      const moving=Math.abs(this.vx)>4, breathe=(moving?0:Math.sin(performance.now()/320+this.id)*0.6)+(this.covered&&this.peek<=0?7:0);
       ctx.save(); ctx.filter=this.react>0?"brightness(2)":"none";
       drawCharImg(eImg,this.x-cam.x+14,this.y+31+breathe,40,this.flip,this.anim,moving);
       ctx.restore(); return;
@@ -1847,10 +1893,22 @@ class Mech extends Entity{
 }
 class Robot extends Mech{
   // soldado robot: camina pesado, mantiene distancia y dispara rafagas de 3 rayos
-  constructor(x,y){ super(x,y,CONFIG.ROBOT.hp); this.hb={x:6,y:0,w:18,h:31}; this.cool=rnd(.8,1.6); this.burst=0; this.burstT=0; this.flip=true; this.emerge=0; }
+  constructor(x,y){ super(x,y,CONFIG.ROBOT.hp); this.hb={x:6,y:0,w:18,h:31}; this.cool=rnd(.8,1.6); this.burst=0; this.burstT=0; this.flip=true; this.emerge=0; this.shieldT=0; this.shieldCd=rnd(1,3); this.rank=0; this.dodgeCd=rnd(.6,1.6); }
   destroy(){
     this.dead=true; game.score+=400; SFX.mechdie(); this.blast(this.x+14,this.y+12,false); this.debris(this.x+14,this.y+12,10);
     entities.push(new ScorePopup(this.x+14,this.y-8,"+400")); this.drop(0.25,["rapid","shieldup","laser"]);
+  }
+  hurt(d,kind="shot",from=0){
+    // el escudo de energia bloquea lo que llega de frente
+    if(this.shieldT>0&&!this.dead){
+      const front=this.flip?-1:1;
+      if(from===0||sign(from)===-front||kind!=="explosion"){
+        this.flash=0.05; impactPuff(this.x+14+front*13,this.y+14);
+        addLight(this.x+14+front*13,this.y+14,22,"120,220,255",.08);
+        return;
+      }
+    }
+    super.hurt(d,kind);
   }
   fire(){
     const dir=this.flip?-1:1, mx=this.x+14+dir*17, my=this.y+5;
@@ -1867,13 +1925,22 @@ class Robot extends Mech{
       this.vy+=CONFIG.PLAYER.gravity*dt; collideWorld(this,dt); return;
     }
     const dx=player.x-this.x, ad=Math.abs(dx);
-    if(ad<220){
+    this.shieldT-=dt; this.shieldCd-=dt; this.dodgeCd-=dt;
+    if(ad<240){
       this.flip=dx<0;
-      if(this.burst>0){ this.vx=0; this.burstT-=dt; if(this.burstT<=0){ this.burst--; this.burstT=0.13; this.fire(); } }
+      // levanta el escudo si le disparan o esta herido
+      if(this.shieldT<=0&&this.shieldCd<=0&&(incomingShot(this,0.5)||this.hp<=CONFIG.ROBOT.hp*0.5)){
+        this.shieldT=1.5; this.shieldCd=4.2; SFX.shieldUp();
+      }
+      if(this.shieldT>0){ this.vx=sign(dx)*CONFIG.ROBOT.speed*0.45; this.burst=0; }
+      else if(this.burst>0){ this.vx=0; this.burstT-=dt; if(this.burstT<=0){ this.burst--; this.burstT=0.13; this.fire(); } }
       else {
         this.vx=ad>120?sign(dx)*CONFIG.ROBOT.speed:ad<70?-sign(dx)*CONFIG.ROBOT.speed*0.8:0;
-        this.cool-=dt; if(this.cool<=0&&ad<190){ this.cool=CONFIG.ROBOT.burstRate+rnd(-.3,.3); this.burst=3; this.burstT=0.25; }
+        if(this.rank>=2)this.vx=sign(dx)*CONFIG.ROBOT.speed*0.6*(ad>170?1:-1);
+        this.cool-=dt;
+        if(this.cool<=0&&ad<190&&this.rank<2){ this.cool=CONFIG.ROBOT.burstRate+rnd(-.3,.3); this.burst=3; this.burstT=0.25; }
       }
+      aiJumpObstacle(this,sign(this.vx));
     } else this.vx=0;
     this.vy+=CONFIG.PLAYER.gravity*dt; collideWorld(this,dt);
     this.anim+=Math.abs(this.vx)*0.12*dt;
@@ -1889,6 +1956,15 @@ class Robot extends Mech{
     drawCharImg(enemyRobotImg,x+14,this.y+31+eo,42,this.flip,this.anim,Math.abs(this.vx)>3);
     ctx.restore();
     const k=42/300; if(eo<20)this.glow(x+14+(this.flip?-1:1)*(172-150)*k,this.y-11+42*k+eo,2.4,0.45+0.3*Math.sin(this.t*8));
+    if(this.shieldT>0){
+      // escudo hexagonal de energia delante del robot
+      const f=this.flip?-1:1, sx=x+14+f*13, sy=this.y+15, a=clamp(this.shieldT,0,1)*(0.55+0.25*Math.sin(this.t*18));
+      ctx.save(); ctx.globalCompositeOperation="lighter";
+      ctx.strokeStyle=`rgba(120,220,255,${a.toFixed(2)})`; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.ellipse(sx,sy,6,16,0,f>0?-Math.PI/2:Math.PI/2,f>0?Math.PI/2:Math.PI*1.5); ctx.stroke();
+      ctx.fillStyle=`rgba(90,200,255,${(a*0.22).toFixed(2)})`; ctx.fill();
+      ctx.restore();
+    }
   }
 }
 class Drone extends Mech{
@@ -1914,6 +1990,10 @@ class Drone extends Mech{
     else {
       if(!this.buzzed){this.buzzed=true;SFX.drone();}
       if(Math.random()<dt*0.25)this.side*=-1;
+      // esquiva los disparos subiendo o bajando de golpe
+      this.dodgeT=(this.dodgeT||0)-dt;
+      if(this.dodgeT<=0&&incomingShot(this,0.45)){ this.dodgeT=1.1; this.dodgeY=(Math.random()<.5?-1:1)*26; }
+      if(this.dodgeT<=0)this.dodgeY=(this.dodgeY||0)*0.9;
       const tx=player.x+14+this.side*(55+Math.sin(this.t*0.7)*25);
       this.vx+=(clamp((tx-this.x)*1.5,-75,75)-this.vx)*Math.min(1,dt*2.2);
       this.cool-=dt;
@@ -1925,7 +2005,8 @@ class Drone extends Mech{
       }
     }
     this.x+=this.vx*dt;
-    const ty=groundYAt(this.x)-78+Math.sin(this.t*2.3)*7; this.y+=(ty-this.y)*Math.min(1,dt*2);
+    const herido=this.hp<=1?14:0;
+    const ty=groundYAt(this.x)-78-herido+(this.dodgeY||0)+Math.sin(this.t*2.3)*7; this.y+=(ty-this.y)*Math.min(1,dt*(this.dodgeT>0?5:2));
     this.tilt+=((this.vx/75)*0.3-this.tilt)*Math.min(1,dt*5);
   }
   draw(cam){
@@ -2828,8 +2909,8 @@ class Tank extends Entity{
       return;
     }
     const gp=gamepadState();
-    const L=down("arrowleft")||gp?.l,R=down("arrowright")||gp?.r,U=down("arrowup")||gp?.u,D=down("arrowdown")||gp?.d;
-    this.vx=(R-L)*CONFIG.TANK.speed;if(this.vx)this.flip=this.vx<0;
+    const L=!!(down("arrowleft")||gp?.l),R=!!(down("arrowright")||gp?.r),U=!!(down("arrowup")||gp?.u),D=!!(down("arrowdown")||gp?.d);
+    this.vx=((R?1:0)-(L?1:0))*CONFIG.TANK.speed;if(this.vx)this.flip=this.vx<0;
     if((hit("arrowup","x")||gp?.jump)&&this.onGround){this.vy=-CONFIG.TANK.jump;SFX.jump();}
     this.vy+=CONFIG.PLAYER.gravity*dt;collideWorld(this,dt);
     const aim=aimVector(this.flip? -1:1,L,R,down("d"),D);
@@ -2940,7 +3021,7 @@ class Player extends Entity{
   update(dt){
     if(this.inTank){this.invuln=Math.max(0,this.invuln-dt);gatlingStop();return;}
     const gp=gamepadState();
-    const L=down("arrowleft")||gp?.l,R=down("arrowright")||gp?.r,U=down("arrowup")||gp?.u,D=down("arrowdown")||gp?.d;
+    const L=!!(down("arrowleft")||gp?.l),R=!!(down("arrowright")||gp?.r),U=!!(down("arrowup")||gp?.u),D=!!(down("arrowdown")||gp?.d);
     const move=(R?1:0)-(L?1:0);if(move)this.facing=move;
     let firing=!!(down("s","z")||gp?.fire);
     if(game.outro){
@@ -3253,6 +3334,51 @@ function drawAuraAt(cx,cy,sc,front,red){
     }
   }
   ctx.restore();
+}
+/* ============================================================
+   IA DE LOS ENEMIGOS: cobertura, esquivas y coordinacion
+   ============================================================ */
+function incomingShot(e,t=0.4){
+  // detecta balas del jugador que van a pasar por encima del enemigo
+  const b=box(e), cx=b.x+b.w/2;
+  for(const p of entities){
+    if(p.dead||!(p instanceof Bullet)||p.team!=="player"||!p.vx)continue;
+    const dt=(cx-p.x)/p.vx;
+    if(dt<=0||dt>t)continue;
+    const y=p.y+p.vy*dt;
+    if(y>b.y-8&&y<b.y+b.h+8)return true;
+  }
+  return false;
+}
+function coverSpotNear(x,px,range=150){
+  // parapeto que quede entre el enemigo y el jugador: sacos, barriles, cajas o escombros
+  let best=null, bd=1e9;
+  const test=wx=>{
+    const d=Math.abs(wx-x);
+    if(d>range||d<6)return;
+    if(Math.sign(px-wx)!==Math.sign(px-x))return;
+    if(Math.abs(px-wx)>Math.abs(px-x))return;
+    if(d<bd){ bd=d; best=wx; }
+  };
+  for(const [wx,kind] of SCENERY)test(wx);
+  for(const e of entities) if(e instanceof Crate&&!e.dead)test(e.x+14);
+  const q=game.quake; if(q&&q.rubble) for(const r of q.rubble)test(r.x);
+  return best;
+}
+function aiJumpObstacle(e,dir){
+  if(!e.onGround||!dir)return;
+  const c=e.x+e.hb.x+e.hb.w/2, g0=groundYAt(c), ahead=c+dir*16;
+  if(groundYAt(ahead)<g0-4||inFissure(ahead)||inFissure(ahead+dir*10)) e.vy=-CONFIG.PLAYER.jump*0.85;
+}
+function rankShooters(){
+  // solo los dos mas cercanos disparan a la vez; el resto se reposiciona
+  const list=[];
+  for(const e of entities){
+    if(e.dead)continue;
+    if((e instanceof Enemy&&e.type==="rifle")||e instanceof Robot){ if(Math.abs(e.x-player.x)<320)list.push(e); else e.rank=9; }
+  }
+  list.sort((a,b)=>Math.abs(a.x-player.x)-Math.abs(b.x-player.x));
+  list.forEach((e,i)=>e.rank=i);
 }
 function isHostile(e){ return e instanceof Enemy||e instanceof Turret||e instanceof Boss||e instanceof EnemyTank||e.hostile===true; }
 function enemyShoot(e){
@@ -3770,6 +3896,7 @@ function update(dt){
     game.stormT=(game.stormT||0)-dt;
     if(game.stormT<=0){ game.stormT=rnd(0.55,1.2); spawnStormBolt(); }
   } else game.stormT=0;
+  rankShooters();
   updateOutro(dt);
   updateDescent(dt);
   if(!game.lair){
